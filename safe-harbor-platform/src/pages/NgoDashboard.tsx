@@ -410,7 +410,7 @@ const buildReferralReportPdf = (referrals: any[]) => {
       ["Reporter Phone", user.phone || "Not provided"],
       ["Reporter Role", user.role || "Not provided"],
       ["Police Station", user.policeStationName || referral.policeStationId || "Not provided"],
-      ["Preferred NGO", user.preferredNgoName || referral.preferredNgoId || "Not provided"],
+      ["Assigned NGO", referral.referredNgoName || referral.referredNgoId || user.preferredNgoName || "Not assigned"],
       ["Evidence Files", referral.evidenceIds?.length || 0],
     ]);
 
