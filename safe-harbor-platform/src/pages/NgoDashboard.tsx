@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { io } from "socket.io-client";
-import { uploadUrl } from "@/lib/api";
+import { uploadUrl, evidenceUrl } from "@/lib/api";
 import { removeChatbaseWidget } from "@/lib/chatbot";
 import {
   LayoutDashboard,
@@ -128,13 +128,13 @@ const EvidencePreviewList = ({ evidenceIds = [] }: { evidenceIds?: any[] }) => {
             </Button>
             <h3 className="font-semibold text-foreground pr-10">{viewingEvidence.name || "Evidence"}</h3>
             {viewingEvidence.type === "image" ? (
-              <img src={uploadUrl(viewingEvidence.fileUrl)} alt="Evidence" className="w-full rounded-lg border border-border max-h-[70vh] object-contain" />
+              <img src={evidenceUrl(viewingEvidence)} alt="Evidence" className="w-full rounded-lg border border-border max-h-[70vh] object-contain" />
             ) : viewingEvidence.type === "audio" ? (
-              <audio controls src={uploadUrl(viewingEvidence.fileUrl)} className="w-full" autoPlay controlsList="nodownload" />
+              <audio controls src={evidenceUrl(viewingEvidence)} className="w-full" autoPlay controlsList="nodownload" />
             ) : (
               <div className="bg-muted/50 rounded-lg p-6 text-center space-y-3">
                 <p className="text-sm text-muted-foreground">File type: {viewingEvidence.type || "file"}</p>
-                <Button variant="outline" onClick={() => window.open(uploadUrl(viewingEvidence.fileUrl), "_blank")}>
+                <Button variant="outline" onClick={() => window.open(evidenceUrl(viewingEvidence), "_blank")}>
                   Open File
                 </Button>
               </div>
@@ -419,7 +419,7 @@ const buildReferralReportPdf = (referrals: any[]) => {
       drawTableRow(["#", "Name", "Type", "File URL"], [34, 230, 90, contentWidth - 354], { header: true });
       referral.evidenceIds.forEach((evidence: any, evidenceIndex: number) => {
         drawTableRow(
-          [evidenceIndex + 1, evidence.name || "Unnamed", evidence.type || "File", uploadUrl(evidence.fileUrl) || "No URL"],
+          [evidenceIndex + 1, evidence.name || "Unnamed", evidence.type || "File", evidenceUrl(evidence) || "No URL"],
           [34, 230, 90, contentWidth - 354],
           { maxLines: 2 }
         );

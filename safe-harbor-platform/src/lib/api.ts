@@ -59,6 +59,18 @@ export const uploadUrl = (path: string) => {
   return `${API_ROOT}${encodedPath}`;
 };
 
+/** Prefer authenticated API file route so officer/NGO previews hit the correct API host. */
+export const evidenceUrl = (evidence?: { _id?: string; id?: string; fileUrl?: string } | null) => {
+  if (!evidence) return "";
+  const id = evidence.id || evidence._id;
+  if (id) {
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("token") : "";
+    const base = apiUrl(`/evidence/${id}/file`);
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  }
+  return uploadUrl(evidence.fileUrl || "");
+};
+
 export const configureApiFetch = () => {
   if (typeof window === "undefined") return;
 

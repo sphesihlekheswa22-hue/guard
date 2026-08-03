@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, Trash2, CheckCircle, Clock, Play, X, AlertTriangle, LocateFixed, MapPin } from "lucide-react";
 import { socketService } from "@/services/socketService";
-import { uploadUrl } from "@/lib/api";
+import { uploadUrl, evidenceUrl } from "@/lib/api";
 
 const TrackCase = () => {
   const { toast } = useToast();
@@ -1384,7 +1384,7 @@ const TrackCase = () => {
                                 className="h-6 px-2 text-xs"
                                 onClick={async () => {
                                   try {
-                                    const response = await fetch(uploadUrl(ev.fileUrl));
+                                    const response = await fetch(evidenceUrl(ev));
                                     if (!response.ok) throw new Error("Failed to fetch audio");
                                     const blob = await response.blob();
                                     setAudioBlob(blob);
@@ -1404,14 +1404,14 @@ const TrackCase = () => {
                             </>
                           ) : ev.type === "image" ? (
                             <>
-                              <img src={uploadUrl(ev.fileUrl)} alt={ev.name} className="h-8 w-8 rounded object-cover border" />
+                              <img src={evidenceUrl(ev)} alt={ev.name} className="h-8 w-8 rounded object-cover border" />
                               <span className="text-xs font-medium text-foreground">Image</span>
                               <Button 
                                 size="sm" 
                                 variant="ghost" 
                                 className="h-6 px-2 text-xs"
                                 onClick={() => {
-                                  setPreviewUrl(uploadUrl(ev.fileUrl));
+                                  setPreviewUrl(evidenceUrl(ev));
                                   setPreviewType("image");
                                 }}
                               >

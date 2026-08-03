@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { io } from "socket.io-client";
-import { API_ROOT, uploadUrl } from "@/lib/api";
+import { API_ROOT, uploadUrl, evidenceUrl } from "@/lib/api";
 import { removeChatbaseWidget } from "@/lib/chatbot";
 import {
   LayoutDashboard,
@@ -130,7 +130,7 @@ const EvidencePreviewList = ({ evidenceIds = [] }: { evidenceIds?: any[] }) => {
             <h3 className="font-semibold text-foreground pr-10">{viewingEvidence.name || "Evidence"}</h3>
             {getEvidenceKind(viewingEvidence) === "image" ? (
               <img
-                src={uploadUrl(viewingEvidence.fileUrl)}
+                src={evidenceUrl(viewingEvidence)}
                 alt="Evidence"
                 className="w-full rounded-lg border border-border max-h-[70vh] object-contain bg-muted/20"
                 onError={(e) => {
@@ -138,15 +138,15 @@ const EvidencePreviewList = ({ evidenceIds = [] }: { evidenceIds?: any[] }) => {
                 }}
               />
             ) : getEvidenceKind(viewingEvidence) === "audio" ? (
-              <audio controls src={uploadUrl(viewingEvidence.fileUrl)} className="w-full" autoPlay controlsList="nodownload" />
+              <audio controls src={evidenceUrl(viewingEvidence)} className="w-full" autoPlay controlsList="nodownload" />
             ) : getEvidenceKind(viewingEvidence) === "video" ? (
-              <video controls src={uploadUrl(viewingEvidence.fileUrl)} className="w-full max-h-[70vh] rounded-lg border border-border" />
+              <video controls src={evidenceUrl(viewingEvidence)} className="w-full max-h-[70vh] rounded-lg border border-border" />
             ) : (
               <div className="bg-muted/50 rounded-lg p-6 text-center space-y-3">
                 <p className="text-sm text-muted-foreground">File type: {viewingEvidence.type || "file"}</p>
               </div>
             )}
-            <Button variant="outline" className="w-full" onClick={() => window.open(uploadUrl(viewingEvidence.fileUrl), "_blank")}>
+            <Button variant="outline" className="w-full" onClick={() => window.open(evidenceUrl(viewingEvidence), "_blank")}>
               Open File
             </Button>
           </div>
@@ -469,7 +469,7 @@ const buildAuthorityCasesPdf = (reports: any[], user: any, alertStats: { active:
       drawSectionTitle(`Evidence - ${report.caseId || "N/A"}`);
       drawTableRow(["#", "Name", "Type", "File URL"], [34, 230, 90, contentWidth - 354], { header: true });
       report.evidenceIds.forEach((evidence: any, evidenceIndex: number) => {
-        drawTableRow([evidenceIndex + 1, evidence.name || "Unnamed", evidence.type || "File", uploadUrl(evidence.fileUrl) || "No URL"], [34, 230, 90, contentWidth - 354], { maxLines: 2 });
+        drawTableRow([evidenceIndex + 1, evidence.name || "Unnamed", evidence.type || "File", evidenceUrl(evidence) || "No URL"], [34, 230, 90, contentWidth - 354], { maxLines: 2 });
       });
     }
 
@@ -1110,12 +1110,12 @@ const CaseTable = ({
                         <button
                           key={ev._id || ev.id || idx}
                           onClick={() => {
-                            if (!ev.fileUrl) return;
+                            if (!ev.fileUrl && !(ev.id || ev._id)) return;
                             if (kind === "image" || kind === "audio" || kind === "video") {
-                              setPreviewUrl(uploadUrl(ev.fileUrl));
+                              setPreviewUrl(evidenceUrl(ev));
                               setPreviewType(kind === "audio" ? "audio" : "image");
                             } else {
-                              window.open(uploadUrl(ev.fileUrl), "_blank");
+                              window.open(evidenceUrl(ev), "_blank");
                             }
                           }}
                           className="text-xs px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
@@ -1521,23 +1521,23 @@ const AccessEvidence = () => {
             <Button variant="outline" size="sm" onClick={() => setViewingEvidence(null)}>Close</Button>
           </div>
           {getEvidenceKind(viewingEvidence) === "image" ? (
-            <img src={uploadUrl(viewingEvidence.fileUrl)} alt="Evidence" className="w-full rounded-lg border border-border max-h-[70vh] object-contain" />
+            <img src={evidenceUrl(viewingEvidence)} alt="Evidence" className="w-full rounded-lg border border-border max-h-[70vh] object-contain" />
           ) : getEvidenceKind(viewingEvidence) === "audio" ? (
             <audio 
               controls 
-              src={uploadUrl(viewingEvidence.fileUrl)}
+              src={evidenceUrl(viewingEvidence)}
               className="w-full" 
               autoPlay
               controlsList="nodownload"
             />
           ) : getEvidenceKind(viewingEvidence) === "video" ? (
-            <video controls src={uploadUrl(viewingEvidence.fileUrl)} className="w-full max-h-[70vh] rounded-lg border border-border" />
+            <video controls src={evidenceUrl(viewingEvidence)} className="w-full max-h-[70vh] rounded-lg border border-border" />
           ) : (
             <div className="bg-muted/50 rounded-lg p-6 text-center">
               <p className="text-sm text-muted-foreground">File type: {viewingEvidence.type || "file"}</p>
             </div>
           )}
-          <Button variant="outline" className="w-full" onClick={() => window.open(uploadUrl(viewingEvidence.fileUrl), "_blank")}>
+          <Button variant="outline" className="w-full" onClick={() => window.open(evidenceUrl(viewingEvidence), "_blank")}>
             Open File
           </Button>
         </div>
