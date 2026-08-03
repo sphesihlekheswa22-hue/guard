@@ -177,9 +177,11 @@ const TrackCase = () => {
             lastUpdate: r.updatedAt ? timeAgo(r.updatedAt) : "",
             evidence: r.evidenceIds ? r.evidenceIds.length : 0,
             evidenceFiles: (r.evidenceIds || []).map((ev: any) => ({
+              id: ev.id || ev._id,
+              _id: ev._id || ev.id,
               fileUrl: ev.fileUrl,
               type: ev.type,
-              name: ev.name || (ev.fileUrl ? ev.fileUrl.split("/").pop() : "evidence")
+              name: ev.name || (ev.fileUrl ? ev.fileUrl.split("/").pop() : "evidence"),
             })),
             description: r.description || "",
             location: r.location?.address || r.location || "",
@@ -830,9 +832,11 @@ const TrackCase = () => {
         lastUpdate: caseDetails.lastUpdate || (caseDetails.updatedAt ? timeAgo(caseDetails.updatedAt) : ""),
         evidence: caseDetails.evidence || (caseDetails.evidenceIds ? caseDetails.evidenceIds.length : 0),
         evidenceFiles: caseDetails.evidenceFiles || (caseDetails.evidenceIds || []).map((ev: any) => ({
+          id: ev.id || ev._id,
+          _id: ev._id || ev.id,
           fileUrl: ev.fileUrl,
           type: ev.type,
-          name: ev.name || (ev.fileUrl ? ev.fileUrl.split("/").pop() : "evidence")
+          name: ev.name || (ev.fileUrl ? ev.fileUrl.split("/").pop() : "evidence"),
         })),
         description: caseDetails.description || (caseDetails.type?.includes("emergency") || caseDetails.type?.includes("Emergency") ? "SOS Emergency Alert" : ""),
         location: typeof caseDetails.location === "string" ? caseDetails.location : (caseDetails.location?.address || ""),
@@ -1370,9 +1374,45 @@ const TrackCase = () => {
                   <span className="text-xs text-muted-foreground">Evidence</span>
                   {currentCase.evidenceFiles && currentCase.evidenceFiles.length > 0 ? (
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {currentCase.evidenceFiles.map((ev, idx) => (
-                        <div key={idx} className="flex items-center gap-2 border border-border/30 rounded-lg px-3 py-2 bg-muted/20">
-                          {ev.type === "audio" ? (
+                      {currentCase.evidenceFiles.map((ev, idx) => {
+                        const kind =
+                          String(ev.type || "").toLowerCase() === "image" ||
+                          /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(String(ev.name || ev.fileUrl || ""))
+                            ? "image"
+                            : String(ev.type || "").toLowerCase() === "audio" ||
+                                /\.(mp3|wav|ogg|webm|m4a)$/i.test(String(ev.name || ev.fileUrl || ""))
+                              ? "audio"
+                              : "file";
+
+                        const openEvidence = async () => {
+                          try {
+                            const url = evidenceUrl(ev);
+                            if (!url) throw new Error("No evidence file URL");
+                            const response = await fetch(url);
+                            if (!response.ok) {
+                              const errBody = await response.json().catch(() => ({}));
+                              throw new Error(errBody.msg || errBody.message || `Failed to load (${response.status})`);
+                            }
+                            const blob = await response.blob();
+                            if (audioBlob && previewUrl?.startsWith("blob:")) {
+                              URL.revokeObjectURL(previewUrl);
+                            }
+                            const objectUrl = URL.createObjectURL(blob);
+                            setAudioBlob(blob);
+                            setPreviewUrl(objectUrl);
+                            setPreviewType(kind === "audio" ? "audio" : "image");
+                          } catch (err) {
+                            toast({
+                              title: "Cannot preview evidence",
+                              description: (err as Error).message,
+                              variant: "destructive",
+                            });
+                          }
+                        };
+
+                        return (
+                        <div key={ev.id || ev._id || idx} className="flex items-center gap-2 border border-border/30 rounded-lg px-3 py-2 bg-muted/20">
+                          {kind === "audio" ? (
                             <>
                               <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
                                 <Play className="w-3 h-3 text-blue-600 dark:text-blue-300" />
@@ -1382,50 +1422,47 @@ const TrackCase = () => {
                                 size="sm" 
                                 variant="ghost" 
                                 className="h-6 px-2 text-xs"
-                                onClick={async () => {
-                                  try {
-                                    const response = await fetch(evidenceUrl(ev));
-                                    if (!response.ok) throw new Error("Failed to fetch audio");
-                                    const blob = await response.blob();
-                                    setAudioBlob(blob);
-                                    setPreviewUrl(URL.createObjectURL(blob));
-                                    setPreviewType("audio");
-                                  } catch (err) {
-                                    toast({
-                                      title: "Failed to load audio",
-                                      description: (err as Error).message,
-                                      variant: "destructive"
-                                    });
-                                  }
-                                }}
+                                onClick={openEvidence}
                               >
                                 Play
                               </Button>
                             </>
-                          ) : ev.type === "image" ? (
+                          ) : kind === "image" ? (
                             <>
-                              <img src={evidenceUrl(ev)} alt={ev.name} className="h-8 w-8 rounded object-cover border" />
-                              <span className="text-xs font-medium text-foreground">Image</span>
+                              <img
+                                src={evidenceUrl(ev)}
+                                alt={ev.name}
+                                className="h-8 w-8 rounded object-cover border bg-muted"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.opacity = "0.3";
+                                }}
+                              />
+                              <span className="text-xs font-medium text-foreground truncate max-w-[120px]">{ev.name || "Image"}</span>
                               <Button 
                                 size="sm" 
                                 variant="ghost" 
                                 className="h-6 px-2 text-xs"
-                                onClick={() => {
-                                  setPreviewUrl(evidenceUrl(ev));
-                                  setPreviewType("image");
-                                }}
+                                onClick={openEvidence}
                               >
                                 Preview
                               </Button>
                             </>
                           ) : (
                             <>
-                              <span className="text-xs">{ev.name}</span>
-                              <span className="text-xs text-muted-foreground">{ev.type}</span>
+                              <span className="text-xs truncate max-w-[140px]">{ev.name || "File"}</span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-xs"
+                                onClick={() => window.open(evidenceUrl(ev), "_blank")}
+                              >
+                                Open
+                              </Button>
                             </>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <span className="text-xs text-muted-foreground">No evidence</span>
@@ -1646,7 +1683,21 @@ const TrackCase = () => {
           {previewType === "image" && (
             <div className="flex flex-col gap-3">
               <h3 className="text-lg font-semibold text-foreground">Image Preview</h3>
-              <img src={previewUrl} alt="Preview" className="w-full rounded-lg border border-border/30 max-h-[80vh] max-w-full object-contain" />
+              <img
+                src={previewUrl}
+                alt="Preview"
+                className="w-full rounded-lg border border-border/30 max-h-[80vh] max-w-full object-contain bg-muted/20"
+                onError={() => {
+                  toast({
+                    title: "Image failed to load",
+                    description: "The file may be missing after a server restart. Re-upload the evidence on a new report.",
+                    variant: "destructive",
+                  });
+                }}
+              />
+              <Button variant="outline" onClick={() => window.open(previewUrl || "", "_blank")}>
+                Open in new tab
+              </Button>
             </div>
           )}
           {previewType === "audio" && (
