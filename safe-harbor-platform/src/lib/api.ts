@@ -22,8 +22,41 @@ export const apiUrl = (path: string) => {
 
 export const uploadUrl = (path: string) => {
   if (!path) return "";
-  if (/^https?:\/\//i.test(path) || path.startsWith("blob:") || path.startsWith("data:")) return path;
-  return `${API_ROOT}${path.startsWith("/") ? path : `/${path}`}`;
+  if (/^https?:\/\//i.test(path) || path.startsWith("blob:") || path.startsWith("data:")) {
+    try {
+      // Re-encode pathname so spaces in filenames work
+      const url = new URL(path);
+      url.pathname = url.pathname
+        .split("/")
+        .map((segment) => {
+          if (!segment) return "";
+          try {
+            return encodeURIComponent(decodeURIComponent(segment));
+          } catch {
+            return encodeURIComponent(segment);
+          }
+        })
+        .join("/");
+      return url.toString();
+    } catch {
+      return path;
+    }
+  }
+
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const encodedPath = normalized
+    .split("/")
+    .map((segment) => {
+      if (!segment) return "";
+      try {
+        return encodeURIComponent(decodeURIComponent(segment));
+      } catch {
+        return encodeURIComponent(segment);
+      }
+    })
+    .join("/");
+
+  return `${API_ROOT}${encodedPath}`;
 };
 
 export const configureApiFetch = () => {

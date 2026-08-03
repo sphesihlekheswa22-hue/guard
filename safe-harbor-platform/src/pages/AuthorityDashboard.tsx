@@ -66,6 +66,15 @@ const filterExcludedReports = (items: any[]) => {
 const EvidencePreviewList = ({ evidenceIds = [] }: { evidenceIds?: any[] }) => {
   const [viewingEvidence, setViewingEvidence] = useState<any | null>(null);
 
+  const getEvidenceKind = (evidence: any): "image" | "audio" | "video" | "file" => {
+    const type = String(evidence?.type || "").toLowerCase();
+    const name = String(evidence?.name || evidence?.fileUrl || "").toLowerCase();
+    if (type === "image" || /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(name)) return "image";
+    if (type === "audio" || /\.(mp3|wav|ogg|webm|m4a)$/i.test(name)) return "audio";
+    if (type === "video" || /\.(mp4|mov|avi|mkv)$/i.test(name)) return "video";
+    return "file";
+  };
+
   const handleViewEvidence = (evidence: any) => {
     const evidenceId = evidence?._id || evidence?.id;
     const token = localStorage.getItem("token");
@@ -87,12 +96,12 @@ const EvidencePreviewList = ({ evidenceIds = [] }: { evidenceIds?: any[] }) => {
   return (
     <div className="mt-2 space-y-2">
       {evidenceIds.map((evidence: any, index: number) => (
-        <div key={evidence._id || index} className="flex items-center justify-between gap-3 bg-muted/30 rounded-lg p-3">
+        <div key={evidence._id || evidence.id || index} className="flex items-center justify-between gap-3 bg-muted/30 rounded-lg p-3">
           <div className="flex items-center gap-3 min-w-0">
             <FileText className="h-5 w-5 text-primary shrink-0" />
             <div className="min-w-0">
               <p className="font-medium text-foreground text-sm truncate">{evidence.name || `Evidence ${index + 1}`}</p>
-              <p className="text-xs text-muted-foreground capitalize">{evidence.type || "file"}</p>
+              <p className="text-xs text-muted-foreground capitalize">{getEvidenceKind(evidence)}</p>
             </div>
           </div>
           <Button
@@ -107,7 +116,7 @@ const EvidencePreviewList = ({ evidenceIds = [] }: { evidenceIds?: any[] }) => {
       ))}
 
       {viewingEvidence && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
           <div className="bg-card rounded-lg p-6 border border-border/50 shadow-sm space-y-3 max-w-2xl w-full relative">
             <Button
               variant="ghost"
@@ -119,23 +128,41 @@ const EvidencePreviewList = ({ evidenceIds = [] }: { evidenceIds?: any[] }) => {
               <X className="h-5 w-5" />
             </Button>
             <h3 className="font-semibold text-foreground pr-10">{viewingEvidence.name || "Evidence"}</h3>
-            {viewingEvidence.type === "image" ? (
-              <img src={uploadUrl(viewingEvidence.fileUrl)} alt="Evidence" className="w-full rounded-lg border border-border max-h-[70vh] object-contain" />
-            ) : viewingEvidence.type === "audio" ? (
+            {getEvidenceKind(viewingEvidence) === "image" ? (
+              <img
+                src={uploadUrl(viewingEvidence.fileUrl)}
+                alt="Evidence"
+                className="w-full rounded-lg border border-border max-h-[70vh] object-contain bg-muted/20"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).alt = "Preview failed — use Open File";
+                }}
+              />
+            ) : getEvidenceKind(viewingEvidence) === "audio" ? (
               <audio controls src={uploadUrl(viewingEvidence.fileUrl)} className="w-full" autoPlay controlsList="nodownload" />
+            ) : getEvidenceKind(viewingEvidence) === "video" ? (
+              <video controls src={uploadUrl(viewingEvidence.fileUrl)} className="w-full max-h-[70vh] rounded-lg border border-border" />
             ) : (
               <div className="bg-muted/50 rounded-lg p-6 text-center space-y-3">
                 <p className="text-sm text-muted-foreground">File type: {viewingEvidence.type || "file"}</p>
-                <Button variant="outline" onClick={() => window.open(uploadUrl(viewingEvidence.fileUrl), "_blank")}>
-                  Open File
-                </Button>
               </div>
             )}
+            <Button variant="outline" className="w-full" onClick={() => window.open(uploadUrl(viewingEvidence.fileUrl), "_blank")}>
+              Open File
+            </Button>
           </div>
         </div>
       )}
     </div>
   );
+};
+
+const getEvidenceKind = (evidence: any): "image" | "audio" | "video" | "file" => {
+  const type = String(evidence?.type || "").toLowerCase();
+  const name = String(evidence?.name || evidence?.fileUrl || "").toLowerCase();
+  if (type === "image" || /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(name)) return "image";
+  if (type === "audio" || /\.(mp3|wav|ogg|webm|m4a)$/i.test(name)) return "audio";
+  if (type === "video" || /\.(mp4|mov|avi|mkv)$/i.test(name)) return "video";
+  return "file";
 };
 
 const NGO_REFERRAL_STATUSES = ["referred_to_ngo", "call_initiated", "arranged_counselling"];
@@ -1077,24 +1104,27 @@ const CaseTable = ({
               <td className="p-4">
                 {c.evidenceIds && c.evidenceIds.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
-                    {c.evidenceIds.map((ev: any, idx: number) => (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          if (ev.type === "image") {
-                            setPreviewUrl(uploadUrl(ev.fileUrl));
-                            setPreviewType("image");
-                          } else if (ev.type === "audio") {
-                            setPreviewUrl(uploadUrl(ev.fileUrl));
-                            setPreviewType("audio");
-                          }
-                        }}
-                        className="text-xs px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
-                        title={ev.name || "Evidence file"}
-                      >
-                        {ev.type === "image" ? "📷" : "🎤"}
-                      </button>
-                    ))}
+                    {c.evidenceIds.map((ev: any, idx: number) => {
+                      const kind = getEvidenceKind(ev);
+                      return (
+                        <button
+                          key={ev._id || ev.id || idx}
+                          onClick={() => {
+                            if (!ev.fileUrl) return;
+                            if (kind === "image" || kind === "audio" || kind === "video") {
+                              setPreviewUrl(uploadUrl(ev.fileUrl));
+                              setPreviewType(kind === "audio" ? "audio" : "image");
+                            } else {
+                              window.open(uploadUrl(ev.fileUrl), "_blank");
+                            }
+                          }}
+                          className="text-xs px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
+                          title={ev.name || "Evidence file"}
+                        >
+                          {kind === "image" ? "📷" : kind === "audio" ? "🎤" : kind === "video" ? "🎬" : "📄"}
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : (
                   <span className="text-muted-foreground">—</span>
@@ -1162,20 +1192,6 @@ const ViewReports = () => {
   const { toast } = useToast();
   const socketRef = useRef<any>(null);
 
-  const handleViewEvidence = (evidence: any) => {
-    const evidenceId = evidence?._id || evidence?.id;
-    const token = localStorage.getItem("token");
-    if (evidenceId) {
-      fetch(`/api/evidence/${evidenceId}/view`, {
-        method: "POST",
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-      }).catch(() => null);
-    }
-    setViewingEvidence(evidence);
-  };
-
   const fetchReports = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -1224,11 +1240,12 @@ const ViewReports = () => {
         // Add the new report to the beginning of the reports list
         setReports((prevReports) => {
           // Check if report already exists (avoid duplicates)
-          const isDuplicate = prevReports.some(r => r._id === data.reportId);
+          const isDuplicate = prevReports.some(r => r._id === data.reportId || r.id === data.reportId);
           if (isDuplicate) return prevReports;
           
           return [{
             _id: data.reportId,
+            id: data.reportId,
             caseId: data.caseId,
             incidentType: data.incidentType,
             location: data.location,
@@ -1271,7 +1288,9 @@ const ViewReports = () => {
       })
         .then(res => res.ok && res.json())
         .then(data => {
-          setReports(Array.isArray(data) ? data : []);
+          if (Array.isArray(data)) {
+            setReports(filterExcludedReports(data));
+          }
         })
         .catch(err => console.error("Error refreshing reports:", err));
     }, 30000); // Refresh every 30 seconds
@@ -1280,7 +1299,7 @@ const ViewReports = () => {
   }, []);
 
   const selectedCase = selectedCaseId
-    ? reports.find(c => c._id === selectedCaseId)
+    ? reports.find((c) => c._id === selectedCaseId || c.id === selectedCaseId || c.caseId === selectedCaseId)
     : null;
 
   return (
@@ -1292,7 +1311,8 @@ const ViewReports = () => {
     {!loading && <CaseTable cases={reports} filterStatus={filterStatus} onFilterChange={setFilterStatus} onViewDetails={setSelectedCaseId} />}
     
     {selectedCase && (
-      <div className="bg-card rounded-xl border border-border/50 shadow-sm p-6 space-y-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
+        <div className="bg-card rounded-xl border border-border/50 shadow-xl p-6 space-y-4 w-full max-w-2xl my-8 relative">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-foreground">Case Details</h3>
           <Button variant="outline" size="sm" onClick={() => setSelectedCaseId(null)}>Close</Button>
@@ -1314,7 +1334,15 @@ const ViewReports = () => {
             <span className="text-sm text-muted-foreground">Status</span>
             <Badge className={`${statusStyles[selectedCase.status] || "bg-gray-100 text-gray-600"} border-0 capitalize w-fit`}>{selectedCase.status}</Badge>
           </div>
-          <div>
+          <div className="md:col-span-2">
+            <span className="text-sm text-muted-foreground">Description</span>
+            <p className="font-semibold text-foreground whitespace-pre-wrap">{selectedCase.description || "—"}</p>
+          </div>
+          <div className="md:col-span-2">
+            <span className="text-sm text-muted-foreground">Location</span>
+            <p className="font-semibold text-foreground">{formatAuthorityLocation(selectedCase.location)}</p>
+          </div>
+          <div className="md:col-span-2">
             <span className="text-sm text-muted-foreground">Evidence Files</span>
             <p className="font-semibold text-foreground">{selectedCase.evidenceIds ? selectedCase.evidenceIds.length : 0} files</p>
             <EvidencePreviewList evidenceIds={selectedCase.evidenceIds || []} />
@@ -1338,6 +1366,7 @@ const ViewReports = () => {
             </div>
           </div>
         )}
+        </div>
       </div>
     )}
   </div>
@@ -1491,9 +1520,9 @@ const AccessEvidence = () => {
             <h3 className="font-semibold text-foreground">{viewingEvidence.name || `Evidence`}</h3>
             <Button variant="outline" size="sm" onClick={() => setViewingEvidence(null)}>Close</Button>
           </div>
-          {viewingEvidence.type === "image" ? (
+          {getEvidenceKind(viewingEvidence) === "image" ? (
             <img src={uploadUrl(viewingEvidence.fileUrl)} alt="Evidence" className="w-full rounded-lg border border-border max-h-[70vh] object-contain" />
-          ) : viewingEvidence.type === "audio" ? (
+          ) : getEvidenceKind(viewingEvidence) === "audio" ? (
             <audio 
               controls 
               src={uploadUrl(viewingEvidence.fileUrl)}
@@ -1501,11 +1530,16 @@ const AccessEvidence = () => {
               autoPlay
               controlsList="nodownload"
             />
+          ) : getEvidenceKind(viewingEvidence) === "video" ? (
+            <video controls src={uploadUrl(viewingEvidence.fileUrl)} className="w-full max-h-[70vh] rounded-lg border border-border" />
           ) : (
             <div className="bg-muted/50 rounded-lg p-6 text-center">
-              <p className="text-sm text-muted-foreground">File type: {viewingEvidence.type}</p>
+              <p className="text-sm text-muted-foreground">File type: {viewingEvidence.type || "file"}</p>
             </div>
           )}
+          <Button variant="outline" className="w-full" onClick={() => window.open(uploadUrl(viewingEvidence.fileUrl), "_blank")}>
+            Open File
+          </Button>
         </div>
       </div>
     )}
