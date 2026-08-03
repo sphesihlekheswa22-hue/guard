@@ -35,7 +35,6 @@ services:
     runtime: static
     rootDir: safe-harbor-platform
     plan: free
-    region: oregon
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     routes:
