@@ -15,42 +15,9 @@ const start = async () => {
   const app = express();
   const server = http.createServer(app);
 
-  const normalizeOrigin = (value = "") => String(value).trim().replace(/\/$/, "");
-
-  const allowedOrigins = new Set(
-    [
-      "http://localhost:8080",
-      "http://localhost:8081",
-      process.env.FRONTEND_URL,
-      ...(String(process.env.FRONTEND_URLS || "").split(",")),
-    ]
-      .map(normalizeOrigin)
-      .filter(Boolean)
-  );
-
-  const isAllowedOrigin = (origin) => {
-    if (!origin) return true;
-    const normalized = normalizeOrigin(origin);
-    if (allowedOrigins.has(normalized)) return true;
-
-    // Allow any Render-hosted frontend (Blueprint URL names can differ)
-    try {
-      const { hostname } = new URL(normalized);
-      if (hostname.endsWith(".onrender.com")) return true;
-    } catch {
-      return false;
-    }
-    return false;
-  };
-
+  // Reflect any browser Origin (demo deploy: frontend + API are separate Render URLs).
   const corsOptions = {
-    origin: function (origin, callback) {
-      if (isAllowedOrigin(origin)) {
-        callback(null, true);
-      } else {
-        callback(null, false);
-      }
-    },
+    origin: true,
     credentials: true,
   };
 

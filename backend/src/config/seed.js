@@ -65,7 +65,7 @@ async function ensureContactsForReporter(reporter) {
   });
 }
 
-async function seedOperationalData({ station, hope, admin, reporter, reporter2, officer, ngoWorker }) {
+async function seedOperationalData({ station, hope, reporter, reporter2 }) {
   const existing = await prisma.report.findFirst({ where: { clientRequestId: "seed-report-1" } });
   if (existing) {
     console.log("   Operational demo cases already present — skipping recreate");
@@ -81,6 +81,8 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
       clientRequestId: "seed-report-1",
       caseId: "GBV-20260803-1001",
       userId: reporter.id,
+      policeStationId: stationId,
+      preferredNgoId: hopeId,
       incidentType: "Domestic Violence",
       description: "Reporter was assaulted by an intimate partner at home in Soshanguve Block H.",
       status: "pending",
@@ -91,6 +93,8 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
       clientRequestId: "seed-report-2",
       caseId: "GBV-20260803-1002",
       userId: reporter.id,
+      policeStationId: stationId,
+      preferredNgoId: hopeId,
       incidentType: "Harassment",
       description: "Ongoing harassment near Soshanguve Plaza.",
       status: "investigating",
@@ -104,11 +108,13 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
       clientRequestId: "seed-report-3",
       caseId: "GBV-20260803-1003",
       userId: reporter.id,
+      policeStationId: stationId,
+      preferredNgoId: hopeId,
+      referredNgoId: hopeId,
+      referredNgoName: "Hope Warriors",
       incidentType: "Stalking",
       description: "Unknown person has been stalking the reporter around Tshego Street.",
       status: "referred_to_ngo",
-      referredNgoId: hopeId,
-      referredNgoName: "Hope Warriors",
       location: loc(2),
       statusHistory: [
         { status: "pending", changedAt: new Date().toISOString(), reason: "Submitted" },
@@ -123,6 +129,8 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
       clientRequestId: "seed-report-4",
       caseId: "GBV-20260803-1004",
       userId: reporter.id,
+      policeStationId: stationId,
+      preferredNgoId: hopeId,
       incidentType: "Assault",
       description: "Physical assault reported near the police station precinct.",
       status: "resolved",
@@ -136,8 +144,10 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
       clientRequestId: "seed-report-5",
       caseId: "GBV-20260803-1005",
       userId: reporter2.id,
+      policeStationId: stationId,
+      preferredNgoId: hopeId,
       incidentType: "Domestic Violence",
-      description: "Incident reported from Block NN.",
+      description: "Second reporter case for NGO/officer dashboards.",
       status: "pending",
       location: loc(3),
       statusHistory: [{ status: "pending", changedAt: new Date().toISOString(), reason: "Submitted" }],
@@ -146,13 +156,15 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
       clientRequestId: "seed-report-6",
       caseId: "GBV-20260803-1006",
       userId: reporter2.id,
+      policeStationId: stationId,
+      preferredNgoId: hopeId,
       incidentType: "Harassment",
-      description: "Verbal harassment while commuting in Soshanguve.",
+      description: "Verbal abuse reported near Block NN.",
       status: "investigating",
       location: loc(1),
       statusHistory: [
         { status: "pending", changedAt: new Date().toISOString(), reason: "Submitted" },
-        { status: "investigating", changedAt: new Date().toISOString(), reason: "Under review" },
+        { status: "investigating", changedAt: new Date().toISOString(), reason: "Opened" },
       ],
     },
   ];
@@ -160,24 +172,13 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
   for (const def of defs) {
     await prisma.report.create({
       data: {
-        caseId: def.caseId,
-        userId: def.userId,
-        policeStationId: stationId,
-        preferredNgoId: hopeId,
-        referredNgoId: def.referredNgoId || null,
-        referredNgoName: def.referredNgoName || null,
-        clientRequestId: def.clientRequestId,
-        incidentType: def.incidentType,
-        description: def.description,
-        status: def.status,
-        location: def.location,
-        statusHistory: def.statusHistory || [],
+        ...def,
         interactions: def.interactions || [],
       },
     });
   }
 
-  const sosActive = await prisma.case.create({
+  const activeSos = await prisma.case.create({
     data: {
       userId: reporter.id,
       policeStationId: stationId,
@@ -185,7 +186,7 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
       type: "emergency",
       priority: "critical",
       status: "active",
-      location: loc(4),
+      location: loc(0),
       sosTriggeredAt: new Date(),
       notifiedContacts: [],
     },
@@ -194,23 +195,23 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
   await prisma.alert.create({
     data: {
       userId: reporter.id,
-      caseId: sosActive.id,
+      caseId: activeSos.id,
       policeStationId: stationId,
       type: "sos",
       status: "active",
-      location: loc(4),
+      location: loc(0),
     },
   });
 
-  const sosResolved = await prisma.case.create({
+  const resolvedSos = await prisma.case.create({
     data: {
-      userId: reporter.id,
+      userId: reporter2.id,
       policeStationId: stationId,
       caseId: "SOS-D4E5F6",
       type: "emergency",
       priority: "critical",
       status: "resolved",
-      location: loc(0),
+      location: loc(2),
       sosTriggeredAt: new Date(Date.now() - 86400000),
       notifiedContacts: [],
     },
@@ -218,25 +219,14 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
 
   await prisma.alert.create({
     data: {
-      userId: reporter.id,
-      caseId: sosResolved.id,
+      userId: reporter2.id,
+      caseId: resolvedSos.id,
       policeStationId: stationId,
       type: "sos",
       status: "resolved",
-      location: loc(0),
-      acknowledgedById: officer.id,
-      acknowledgedAt: new Date(),
+      location: loc(2),
       resolvedAt: new Date(),
     },
-  });
-
-  await prisma.notification.createMany({
-    data: [
-      { userId: reporter.id, message: "Your report GBV-20260803-1001 was received by SAPS Soshanguve." },
-      { userId: officer.id, message: "New SOS SOS-A1B2C3 requires attention." },
-      { userId: ngoWorker.id, message: "Referral GBV-20260803-1003 assigned to Hope Warriors." },
-      { userId: admin.id, message: "System seed completed successfully." },
-    ],
   });
 
   console.log("   Reports: 6 demo GBV cases across pending/investigating/referred/resolved");
@@ -244,18 +234,11 @@ async function seedOperationalData({ station, hope, admin, reporter, reporter2, 
 }
 
 async function ensureSeedData() {
-  // Seed when explicitly requested, or when DB is empty in any environment with SEED_IF_EMPTY.
   if (process.env.SEED_IF_EMPTY !== "true") {
     return;
   }
 
-  const existingUsers = await prisma.user.count();
-  if (existingUsers > 0) {
-    console.log("🌱 SEED_IF_EMPTY skipped — users already exist");
-    return;
-  }
-
-  console.log("🌱 Seeding PostgreSQL demo data...");
+  console.log("🌱 Ensuring PostgreSQL demo users/orgs exist...");
 
   const station = await upsertOrg("policeStation", "soshanguve-0152", {
     name: "SAPS Soshanguve Police Station",
@@ -273,7 +256,7 @@ async function ensureSeedData() {
     active: true,
   });
 
-  const savwa = await upsertOrg("ngoOrg", "savwa", {
+  await upsertOrg("ngoOrg", "savwa", {
     name: "South Africa Volunteer Work Camp Association (SAVWA)",
     phone: "073 241 1341",
     email: "info@powa.co.za",
@@ -286,7 +269,7 @@ async function ensureSeedData() {
     .trim()
     .toLowerCase();
 
-  const admin = await upsertUser(
+  await upsertUser(
     {
       fullName: "SafeGuard Admin",
       email: adminEmail,
@@ -328,7 +311,7 @@ async function ensureSeedData() {
     preferredLanguage: "en",
   });
 
-  const officer = await upsertUser({
+  await upsertUser({
     fullName: "Officer Mandla Nkosi",
     email: "officer@safeguard.local",
     role: "officer",
@@ -339,7 +322,7 @@ async function ensureSeedData() {
     policeStationName: "SAPS Soshanguve Police Station",
   });
 
-  const ngoWorker = await upsertUser({
+  await upsertUser({
     fullName: "Counsellor Ayanda Sithole",
     email: "ngo@safeguard.local",
     role: "ngo_worker",
@@ -352,27 +335,9 @@ async function ensureSeedData() {
 
   await ensureContactsForReporter(reporter);
   await ensureContactsForReporter(reporter2);
+  await seedOperationalData({ station, hope, reporter, reporter2 });
 
-  await seedOperationalData({
-    station,
-    hope,
-    savwa,
-    admin,
-    reporter,
-    reporter2,
-    officer,
-    ngoWorker,
-  });
-
-  const [reportCount, caseCount, alertCount, userCount] = await Promise.all([
-    prisma.report.count(),
-    prisma.case.count(),
-    prisma.alert.count(),
-    prisma.user.count(),
-  ]);
-
-  console.log("🌱 PostgreSQL seed ready");
-  console.log(`   Users: ${userCount} | Reports: ${reportCount} | SOS/Cases: ${caseCount} | Alerts: ${alertCount}`);
+  console.log("✅ Demo data ready");
   console.log("   Admin:     admin@safeguard.com / Admin123!");
   console.log("   Reporter:  reporter@safeguard.local / DemoPass123!");
   console.log("   Officer:   officer@safeguard.local / DemoPass123!");
