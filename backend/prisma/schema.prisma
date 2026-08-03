@@ -1,0 +1,344 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                         String    @id @default(cuid())
+  fullName                   String?
+  email                      String    @unique
+  password                   String?
+  phone                      String?
+  address                    String?
+  idNumber                   String?
+  gender                     String    @default("")
+  role                       String    @default("reporter")
+  policeStationId            String?
+  policeStationName          String?
+  ngoId                      String?
+  ngoName                    String?
+  preferredNgoId             String?
+  preferredNgoName           String?
+  preferredLanguage          String?
+  isVerified                 Boolean   @default(false)
+  accountDeletionStatus      String    @default("none")
+  accountDeletionRequestedAt DateTime?
+  resetPasswordToken         String?
+  resetPasswordExpires       DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  emergencyContacts   EmergencyContact[]
+  reports             Report[]
+  cases               Case[]             @relation("CaseOwner")
+  assignedCases       Case[]             @relation("CaseAssignee")
+  alerts              Alert[]            @relation("AlertOwner")
+  acknowledgedAlerts  Alert[]            @relation("AlertAcknowledger")
+  notifications       Notification[]
+  authSessions        AuthSession[]
+  evidence            Evidence[]
+  liveLocations       LiveLocation[]
+  trackingSessions    TrackingSession[]
+  auditLogs           AuditLog[]
+  reporterProfile     ReporterProfile?
+  policeOfficerProfile PoliceOfficerProfile?
+  ngoProfile          NgoProfile?
+  adminProfile        AdminProfile?
+
+  @@index([role])
+  @@index([policeStationId])
+  @@map("users")
+}
+
+model ReporterProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  fullName          String?
+  email             String?
+  phone             String?
+  policeStationId   String?
+  policeStationName String?
+  preferredNgoId    String?
+  preferredNgoName  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reporter_profiles")
+}
+
+model PoliceOfficerProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  fullName          String?
+  email             String?
+  phone             String?
+  policeStationId   String?
+  policeStationName String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("police_officer_profiles")
+}
+
+model NgoProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  fullName  String?
+  email     String?
+  phone     String?
+  ngoId     String?
+  ngoName   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ngo_profiles")
+}
+
+model AdminProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  fullName  String?
+  email     String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admin_profiles")
+}
+
+model PoliceStation {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  phone     String?
+  email     String?
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("police_stations")
+}
+
+model NgoOrg {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  phone     String?
+  email     String?
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ngo_orgs")
+}
+
+model EmergencyContact {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String?
+  fullName     String?
+  phone        String?
+  relationship String?
+  email        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, email])
+  @@map("emergency_contacts")
+}
+
+model Report {
+  id               String   @id @default(cuid())
+  caseId           String?  @unique
+  userId           String
+  policeStationId  String?
+  preferredNgoId   String?
+  referredNgoId    String?
+  referredNgoName  String?
+  clientRequestId  String?
+  description      String?
+  incidentType     String?
+  location         Json?
+  status           String   @default("pending")
+  statusHistory    Json     @default("[]")
+  interactions     Json     @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evidence Evidence[]
+  cases    Case[]
+  aiAnalysis AiAnalysis?
+
+  @@unique([userId, clientRequestId])
+  @@index([userId, createdAt])
+  @@index([policeStationId, createdAt])
+  @@index([status])
+  @@map("reports")
+}
+
+model Evidence {
+  id        String   @id @default(cuid())
+  reportId  String?
+  fileUrl   String?
+  name      String?
+  type      String?
+  userId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  report Report? @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([reportId])
+  @@map("evidences")
+}
+
+model AiAnalysis {
+  id        String   @id @default(cuid())
+  reportId  String   @unique
+  riskLevel String?
+  insights  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@map("ai_analyses")
+}
+
+model Case {
+  id              String    @id @default(cuid())
+  userId          String
+  policeStationId String?
+  reportId        String?
+  assignedToId    String?
+  caseId          String?   @unique
+  type            String    @default("report")
+  priority        String    @default("medium")
+  status          String    @default("active")
+  location        Json?
+  notes           String?
+  sosTriggeredAt  DateTime?
+  notifiedContacts Json     @default("[]")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user       User    @relation("CaseOwner", fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo User?   @relation("CaseAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  report     Report? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+  alerts     Alert[]
+
+  @@index([userId, createdAt])
+  @@index([policeStationId, status, createdAt])
+  @@index([reportId])
+  @@map("cases")
+}
+
+model Alert {
+  id               String    @id @default(cuid())
+  userId           String
+  caseId           String?
+  policeStationId  String?
+  location         Json?
+  type             String    @default("sos")
+  status           String    @default("active")
+  acknowledgedById String?
+  acknowledgedAt   DateTime?
+  resolvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user           User  @relation("AlertOwner", fields: [userId], references: [id], onDelete: Cascade)
+  case           Case? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  acknowledgedBy User? @relation("AlertAcknowledger", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([policeStationId, status, createdAt])
+  @@index([caseId])
+  @@map("alerts")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  message   String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("auth_sessions")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  actorName    String?
+  actorEmail   String?
+  actorRole    String?
+  action       String?
+  resourceType String?
+  resourceId   String?
+  resourceLabel String?
+  details      String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model LiveLocation {
+  id        String   @id @default(cuid())
+  userId    String
+  location  Json?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("live_locations")
+}
+
+model TrackingSession {
+  id        String    @id @default(cuid())
+  userId    String
+  isActive  Boolean   @default(true)
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("tracking_sessions")
+}

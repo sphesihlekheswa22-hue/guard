@@ -1,19 +1,23 @@
-const Alert = require("../models/alert");
-const Notification = require("../models/notifications");
+const prisma = require("../config/prisma");
+const { serializeAlert } = require("../lib/serialize");
 
 exports.triggerAlertService = async (userId, lat, lng) => {
-  const alert = await Alert.create({
-    userId,
-    location: {
-      type: "Point",
-      coordinates: [lng, lat]
-    }
+  const alert = await prisma.alert.create({
+    data: {
+      userId,
+      location: {
+        type: "Point",
+        coordinates: [lng, lat],
+      },
+    },
   });
 
-  await Notification.create({
-    userId,
-    message: "Emergency alert triggered"
+  await prisma.notification.create({
+    data: {
+      userId,
+      message: "Emergency alert triggered",
+    },
   });
 
-  return alert;
+  return serializeAlert(alert);
 };

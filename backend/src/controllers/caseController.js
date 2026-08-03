@@ -1,11 +1,13 @@
-const Case = require("../models/case");
-const Alert = require("../models/alert");
-const EmergencyContact = require("../models/emergencyContacts");
-const User = require("../models/users");
-const Notification = require("../models/notifications");
+const prisma = require("../config/prisma");
+const { serializeUser, serializeCase, serializeAlert, withId, userIdOf } = require("../lib/serialize");
 const { logAudit } = require("../services/auditService");
 const { isSoshanguveLocation } = require("../constants/soshanguve");
 const { buildSosNotifications } = require("../services/sosNotifyService");
+
+const CASE_INCLUDE = {
+  user: true,
+  assignedTo: true,
+};
 
 const buildLocationUpdate = (body, currentLocation = {}) => {
   const address = typeof body.address === "string" ? body.address.trim().replace(/\s+/g, " ") : "";
@@ -46,37 +48,23 @@ const buildLocationUpdate = (body, currentLocation = {}) => {
   return location;
 };
 
-const getEmergencyContactsForUser = async (user, fallbackUserId) => {
-  const contactsById = new Map();
-  const contactIds = [];
-  const userId = user?._id || fallbackUserId;
+const haversineDistanceMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
-  if (Array.isArray(user?.emergencyContacts)) {
-    user.emergencyContacts.forEach((contact) => {
-      if (contact && contact._id) {
-        contactsById.set(contact._id.toString(), contact);
-        contactIds.push(contact._id);
-      } else if (contact) {
-        contactIds.push(contact);
-      }
-    });
-  }
-
-  const lookupFilters = [];
-  if (userId) lookupFilters.push({ userId });
-  if (contactIds.length > 0) lookupFilters.push({ _id: { $in: contactIds } });
-
-  const contacts = lookupFilters.length > 0
-    ? await EmergencyContact.find({ $or: lookupFilters })
-    : [];
-
-  contacts.forEach((contact) => {
-    contactsById.set(contact._id.toString(), contact);
+const getEmergencyContactsForUser = async (userId) => {
+  const contacts = await prisma.emergencyContact.findMany({
+    where: { userId: String(userId) },
   });
 
-  // Keep contacts that can be reached by email and/or WhatsApp (phone).
-  // Previously this returned only contacts with email, which dropped WhatsApp-only contacts.
-  return Array.from(contactsById.values()).filter((contact) => {
+  return contacts.filter((contact) => {
     const hasEmail = Boolean(String(contact.email || "").trim());
     const phoneDigits = String(contact.phone || "").replace(/\D/g, "");
     const hasPhone = phoneDigits.length >= 9;
@@ -87,40 +75,43 @@ const getEmergencyContactsForUser = async (user, fallbackUserId) => {
 exports.createCase = async (req, res) => {
   const { reportId, assignedTo } = req.body;
 
-  const newCase = await Case.create({
-    userId: req.userId,
-    reportId,
-    assignedTo,
-    type: "report",
-    status: "active"
+  const newCase = await prisma.case.create({
+    data: {
+      userId: req.userId,
+      reportId: reportId || null,
+      assignedToId: assignedTo || null,
+      type: "report",
+      status: "active",
+    },
   });
 
-  res.json(newCase);
+  res.json(serializeCase(newCase));
 };
 
 exports.updateCaseStatus = async (req, res) => {
   const { status } = req.body;
-  const existingCase = await Case.findById(req.params.id);
+  const existingCase = await prisma.case.findUnique({
+    where: { id: req.params.id },
+  });
 
-  const updated = await Case.findByIdAndUpdate(
-    req.params.id,
-    { status },
-    { returnDocument: 'after' }
-  );
+  const updated = await prisma.case.update({
+    where: { id: req.params.id },
+    data: { status },
+  });
 
   if (updated) {
     await logAudit({
       user: req.user,
       action: "case_status_changed",
       resourceType: "case",
-      resourceId: updated._id,
+      resourceId: updated.id,
       resourceLabel: updated.caseId,
       details: `Changed case status from ${existingCase?.status || "unknown"} to ${status}`,
-      metadata: { oldStatus: existingCase?.status || "", newStatus: status }
+      metadata: { oldStatus: existingCase?.status || "", newStatus: status },
     });
   }
 
-  res.json(updated);
+  res.json(serializeCase(updated));
 };
 
 /**
@@ -136,11 +127,11 @@ exports.createSOSCase = async (req, res) => {
     }
 
     const { latitude, longitude, address, accuracy } = req.body;
-    const userId = req.user._id || req.user.id;
+    const userId = userIdOf(req.user);
 
     if (latitude === undefined || longitude === undefined || latitude === null || longitude === null) {
       return res.status(400).json({
-        error: "Latitude and longitude are required for SOS cases"
+        error: "Latitude and longitude are required for SOS cases",
       });
     }
 
@@ -158,14 +149,18 @@ exports.createSOSCase = async (req, res) => {
 
     let policeStationId = req.user.policeStationId ? String(req.user.policeStationId) : "";
     if (!policeStationId) {
-      const PoliceStation = require("../models/policeStation");
-      const station = await PoliceStation.findOne({
-        $or: [{ name: /soshanguve/i }, { code: /soshanguve/i }],
-      }).select("_id");
-      policeStationId = station?._id ? String(station._id) : "";
+      const station = await prisma.policeStation.findFirst({
+        where: {
+          OR: [
+            { name: { contains: "soshanguve", mode: "insensitive" } },
+            { code: { contains: "soshanguve", mode: "insensitive" } },
+          ],
+        },
+        select: { id: true },
+      });
+      policeStationId = station?.id ? String(station.id) : "";
     }
 
-    // Generate caseId in format "SOS-XXXXXX"
     const randomId = Math.random().toString(16).substring(2, 8).toUpperCase().padEnd(6, "0");
     const caseId = `SOS-${randomId}`;
     const sosTriggeredAt = new Date();
@@ -177,28 +172,35 @@ exports.createSOSCase = async (req, res) => {
       accuracy: accuracy || null,
     };
 
-    const sosCase = await Case.create({
-      userId,
-      policeStationId,
-      caseId,
-      type: "emergency",
-      priority: "critical",
-      status: "active",
-      location: locationPayload,
-      sosTriggeredAt,
+    const sosCase = await prisma.case.create({
+      data: {
+        userId,
+        policeStationId: policeStationId || null,
+        caseId,
+        type: "emergency",
+        priority: "critical",
+        status: "active",
+        location: locationPayload,
+        sosTriggeredAt,
+      },
     });
 
-    const alert = await Alert.create({
-      userId,
-      caseId: sosCase._id,
-      policeStationId,
-      location: locationPayload,
-      type: "sos",
-      status: "active",
+    const alert = await prisma.alert.create({
+      data: {
+        userId,
+        caseId: sosCase.id,
+        policeStationId: policeStationId || null,
+        location: locationPayload,
+        type: "sos",
+        status: "active",
+      },
     });
 
-    const user = await User.findById(userId).populate("emergencyContacts");
-    const emergencyContacts = await getEmergencyContactsForUser(user || req.user, userId);
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { emergencyContacts: true },
+    });
+    const emergencyContacts = await getEmergencyContactsForUser(userId);
     console.log("[SOS] Emergency contact lookup:", {
       userId: String(userId),
       contacts: emergencyContacts.length,
@@ -208,36 +210,40 @@ exports.createSOSCase = async (req, res) => {
 
     const mapLink = `https://maps.google.com/?q=${latitude},${longitude}`;
     const locationText = `${address || "Location captured"} (${mapLink})`;
+    const contactsForNotify = emergencyContacts.map(withId);
     const sosNotifications = buildSosNotifications({
-      emergencyContacts,
+      emergencyContacts: contactsForNotify,
       reporterName: user?.fullName || user?.name || "A SafeGuard user",
       locationText,
       mapLink,
       time: sosTriggeredAt.toLocaleString(),
     });
 
-    // Persist notification intent for audit/demo evidence (email is completed client-side via EmailJS).
-    sosCase.notifiedContacts = emergencyContacts.map((contact) => {
+    const notifiedContacts = emergencyContacts.map((contact) => {
       const methods = [];
       if (contact.email) methods.push("email");
       if (contact.phone) methods.push("whatsapp");
       return {
-        contactId: contact._id,
+        contactId: contact.id,
         notifiedAt: sosTriggeredAt,
         method: methods.join("+") || "none",
       };
     });
-    await sosCase.save();
+
+    await prisma.case.update({
+      where: { id: sosCase.id },
+      data: { notifiedContacts },
+    });
 
     await logAudit({
       user: req.user,
       action: "sos_triggered",
       resourceType: "case",
-      resourceId: sosCase._id,
+      resourceId: sosCase.id,
       resourceLabel: sosCase.caseId,
       details: `SOS triggered at ${locationPayload.address}`,
       metadata: {
-        alertId: alert._id,
+        alertId: alert.id,
         policeStationId,
         mapLink,
         whatsappLinks: sosNotifications.whatsapp.length,
@@ -246,25 +252,26 @@ exports.createSOSCase = async (req, res) => {
       },
     });
 
-    // Notify police officers assigned to this station
     if (policeStationId) {
-      const officers = await User.find({
-        role: { $in: ["officer", "authority"] },
-        policeStationId,
-      }).select("_id");
+      const officers = await prisma.user.findMany({
+        where: {
+          role: { in: ["officer", "authority"] },
+          policeStationId,
+        },
+        select: { id: true },
+      });
 
       if (officers.length > 0) {
-        await Notification.insertMany(
-          officers.map((officer) => ({
-            userId: officer._id,
+        await prisma.notification.createMany({
+          data: officers.map((officer) => ({
+            userId: officer.id,
             message: `SOS ${sosCase.caseId} triggered by ${user?.fullName || "a reporter"} at ${locationPayload.address}`,
             read: false,
-          }))
-        );
+          })),
+        });
       }
     }
 
-    // Emails are sent by the reporter browser via EmailJS (public key). Backend returns targets + WhatsApp links.
     const emailNotifications = {
       total: emergencyContacts.length,
       emailTargets: sosNotifications.emailTargets.length,
@@ -274,7 +281,7 @@ exports.createSOSCase = async (req, res) => {
       pendingClientSend: true,
       channel: "emailjs-client",
       results: sosNotifications.emailTargets.map((contact) => ({
-        contactId: contact._id,
+        contactId: contact._id || contact.id,
         contactName: contact.fullName || contact.name || "Emergency contact",
         email: contact.email,
         success: false,
@@ -286,8 +293,8 @@ exports.createSOSCase = async (req, res) => {
     const io = req.app.locals.io;
     if (io) {
       io.emit("sosAlertReceived", {
-        sosId: sosCase._id,
-        alertId: alert._id,
+        sosId: sosCase.id,
+        alertId: alert.id,
         caseId: sosCase.caseId,
         userId,
         userName: user?.fullName || user?.name || "Unknown User",
@@ -300,20 +307,23 @@ exports.createSOSCase = async (req, res) => {
           accuracy,
         },
         timestamp: sosTriggeredAt,
-        emergencyContacts,
+        emergencyContacts: contactsForNotify,
         mapLink,
         whatsappNotifications: sosNotifications.whatsapp,
       });
     }
 
-    const populatedCase = await sosCase.populate("userId");
+    const populatedCase = await prisma.case.findUnique({
+      where: { id: sosCase.id },
+      include: CASE_INCLUDE,
+    });
 
     res.status(201).json({
       success: true,
       message: "SOS case created successfully",
-      case: populatedCase,
-      alert,
-      emergencyContacts,
+      case: serializeCase({ ...populatedCase, notifiedContacts }),
+      alert: serializeAlert(alert),
+      emergencyContacts: contactsForNotify,
       emailNotifications,
       whatsappNotifications: sosNotifications.whatsapp,
       sosMessage: sosNotifications.message,
@@ -323,7 +333,7 @@ exports.createSOSCase = async (req, res) => {
     console.error("Error creating SOS case:", error);
     res.status(500).json({
       error: "Failed to create SOS case",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -337,32 +347,43 @@ exports.getNearbyResponders = async (req, res) => {
 
     if (!latitude || !longitude) {
       return res.status(400).json({
-        error: "Latitude and longitude are required"
+        error: "Latitude and longitude are required",
       });
     }
 
-    // Find cases within maxDistance meters of the location
-    const nearbyCases = await Case.find({
-      location: {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [parseFloat(longitude), parseFloat(latitude)]
-          },
-          $maxDistance: parseInt(maxDistance)
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+    const maxDist = parseInt(maxDistance, 10);
+
+    const emergencyCases = await prisma.case.findMany({
+      where: {
+        type: "emergency",
+        location: { not: null },
+      },
+      include: { assignedTo: true },
+    });
+
+    const nearbyCases = emergencyCases
+      .filter((item) => {
+        const loc = item.location;
+        if (!loc || !Array.isArray(loc.coordinates) || loc.coordinates.length < 2) {
+          return false;
         }
-      }
-    }).populate("assignedTo");
+        const [caseLng, caseLat] = loc.coordinates;
+        const distance = haversineDistanceMeters(lat, lng, caseLat, caseLng);
+        return distance <= maxDist;
+      })
+      .map(serializeCase);
 
     res.json({
       success: true,
-      nearbyCases
+      nearbyCases,
     });
   } catch (error) {
     console.error("Error getting nearby responders:", error);
     res.status(500).json({
       error: "Failed to get nearby responders",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -372,19 +393,21 @@ exports.getNearbyResponders = async (req, res) => {
  */
 exports.getUserCases = async (req, res) => {
   try {
-    const userId = req.user._id || req.user.id;
+    const userId = userIdOf(req.user);
 
-    const userCases = await Case.find({ userId })
-      .populate("userId assignedTo")
-      .sort({ createdAt: -1 });
+    const userCases = await prisma.case.findMany({
+      where: { userId },
+      include: CASE_INCLUDE,
+      orderBy: { createdAt: "desc" },
+    });
 
     res.json({
       success: true,
       total: userCases.length,
-      cases: userCases.map(c => ({
-        _id: c._id,
-        id: c._id,
-        caseId: c.caseId || c._id.toString().slice(-8).toUpperCase(),
+      cases: userCases.map((c) => ({
+        _id: c.id,
+        id: c.id,
+        caseId: c.caseId || c.id.slice(-8).toUpperCase(),
         type: c.type,
         incidentType: c.type === "emergency" ? "Emergency Alert (SOS)" : "Report",
         priority: c.priority,
@@ -396,13 +419,13 @@ exports.getUserCases = async (req, res) => {
         sosTriggeredAt: c.sosTriggeredAt,
         notifiedContacts: c.notifiedContacts,
         policeStationId: c.policeStationId,
-      }))
+      })),
     });
   } catch (error) {
     console.error("Error fetching user cases:", error);
     res.status(500).json({
       error: "Failed to fetch cases",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -414,9 +437,11 @@ exports.getUserCases = async (req, res) => {
 exports.updateLiveLocation = async (req, res) => {
   try {
     const { caseId } = req.params;
-    const userId = String(req.user._id || req.user.id);
+    const userId = String(userIdOf(req.user));
 
-    const sosCase = await Case.findById(caseId);
+    const sosCase = await prisma.case.findUnique({
+      where: { id: caseId },
+    });
     if (!sosCase) {
       return res.status(404).json({ error: "Case not found" });
     }
@@ -425,26 +450,34 @@ exports.updateLiveLocation = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized: Case does not belong to this user" });
     }
 
-    sosCase.location = buildLocationUpdate(req.body, sosCase.location || {});
-    await sosCase.save();
-    await Alert.updateMany({ caseId: sosCase._id, userId }, { location: sosCase.location });
+    const location = buildLocationUpdate(req.body, sosCase.location || {});
+    const updatedCase = await prisma.case.update({
+      where: { id: caseId },
+      data: { location },
+    });
+
+    await prisma.alert.updateMany({
+      where: { caseId: sosCase.id, userId },
+      data: { location },
+    });
+
     await logAudit({
       user: req.user,
       action: "location_updated",
       resourceType: "case",
-      resourceId: sosCase._id,
+      resourceId: sosCase.id,
       resourceLabel: sosCase.caseId,
       details: "Updated SOS case location",
-      metadata: { location: sosCase.location }
+      metadata: { location },
     });
 
     const io = req.app.locals.io;
     if (io) {
       io.emit("caseLocationUpdated", {
-        caseId: sosCase._id,
+        caseId: sosCase.id,
         displayCaseId: sosCase.caseId,
-        location: sosCase.location,
-        updatedAt: sosCase.updatedAt,
+        location,
+        updatedAt: updatedCase.updatedAt,
         userId: sosCase.userId,
       });
     }
@@ -453,10 +486,10 @@ exports.updateLiveLocation = async (req, res) => {
       success: true,
       message: "Live location updated",
       case: {
-        _id: sosCase._id,
-        location: sosCase.location,
-        updatedAt: sosCase.updatedAt
-      }
+        _id: updatedCase.id,
+        location,
+        updatedAt: updatedCase.updatedAt,
+      },
     });
   } catch (error) {
     if (error.statusCode) {
@@ -466,7 +499,7 @@ exports.updateLiveLocation = async (req, res) => {
     console.error("Error updating live location:", error);
     res.status(500).json({
       error: "Failed to update live location",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -480,34 +513,31 @@ exports.deleteCase = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    // Find the case
-    const caseToDelete = await Case.findById(id);
+    const caseToDelete = await prisma.case.findUnique({
+      where: { id },
+    });
 
     if (!caseToDelete) {
       return res.status(404).json({ error: "Case not found" });
     }
 
-    // Verify ownership
-    if (caseToDelete.userId.toString() !== userId) {
+    if (caseToDelete.userId !== userId) {
       return res.status(403).json({ error: "Unauthorized: Case does not belong to this user" });
     }
 
-    // Delete the case
-    await Case.deleteOne({ _id: id });
-
-    // Also delete associated alerts
-    await Alert.deleteMany({ caseId: id });
+    await prisma.alert.deleteMany({ where: { caseId: id } });
+    await prisma.case.delete({ where: { id } });
 
     res.json({
       success: true,
       message: "Case and associated alerts deleted successfully",
-      id: id
+      id,
     });
   } catch (error) {
     console.error("Error deleting case:", error);
     res.status(500).json({
       error: "Failed to delete case",
-      details: error.message
+      details: error.message,
     });
   }
 };

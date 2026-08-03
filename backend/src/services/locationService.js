@@ -1,15 +1,19 @@
-const LiveLocation = require("../models/liveLocation");
+const prisma = require("../config/prisma");
+
+const buildLocation = (lat, lng) => ({
+  type: "Point",
+  coordinates: [lng, lat],
+});
 
 exports.updateLocationService = async (userId, lat, lng) => {
-  return await LiveLocation.findOneAndUpdate(
-    { userId },
-    {
-      location: {
-        type: "Point",
-        coordinates: [lng, lat]
-      },
-      updatedAt: new Date()
+  return prisma.liveLocation.upsert({
+    where: { userId },
+    create: {
+      userId,
+      location: buildLocation(lat, lng),
     },
-    { upsert: true, returnDocument: 'after' }
-  );
+    update: {
+      location: buildLocation(lat, lng),
+    },
+  });
 };

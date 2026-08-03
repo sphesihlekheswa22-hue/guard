@@ -1,6 +1,3 @@
-// Ensure EmergencyContact model is registered
-require("./src/models/emergencyContacts");
-
 const express = require("express");
 const dotenv = require("dotenv");
 const connectDB = require("./src/config/db");

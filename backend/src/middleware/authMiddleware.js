@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/users");
+const prisma = require("../config/prisma");
+const { serializeUser } = require("../lib/serialize");
 
 module.exports = async (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
@@ -11,11 +12,14 @@ module.exports = async (req, res, next) => {
     const userId = decoded._id || decoded.id;
     if (!userId) return res.status(401).json({ msg: "Invalid token (no user id)" });
 
-    // Fetch full user from DB
-    const user = await User.findById(userId);
+    const user = await prisma.user.findUnique({ where: { id: String(userId) } });
     if (!user) return res.status(401).json({ msg: "User not found" });
 
-    req.user = user;
+    // Preserve mongoose-like accessors used across controllers
+    const shaped = serializeUser(user, { includePassword: true });
+    shaped.id = user.id;
+    shaped._id = user.id;
+    req.user = shaped;
     next();
   } catch (err) {
     res.status(401).json({ msg: "Invalid token" });

@@ -1,11 +1,8 @@
-
-const Report = require("../models/report");
-const Evidence = require("../models/evidence");
-const AIAnalysis = require("../models/aiAnalysis");
+const prisma = require("../config/prisma");
 const path = require("path");
 const { isSoshanguveLocation } = require("../constants/soshanguve");
+const { serializeReport, serializeEvidence, withId, userIdOf } = require("../lib/serialize");
 
-// Generate case ID in format: GBV-YYYYMMDD-XXXX
 const generateCaseId = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -28,8 +25,29 @@ const getMinimumIncidentDateString = () => {
   return minimumDate.toISOString().slice(0, 10);
 };
 
+const reportInclude = {
+  user: true,
+  evidence: true,
+  aiAnalysis: true,
+};
+
+const formatServiceResult = (report, evidenceDocuments, ai, duplicate = false) => ({
+  report: serializeReport({ ...report, evidence: evidenceDocuments }),
+  evidenceIds: (evidenceDocuments || []).map(serializeEvidence),
+  ai: ai ? withId(ai) : null,
+  ...(duplicate ? { duplicate: true } : {}),
+});
+
+const findDuplicateReport = async (userId, clientRequestId) => {
+  if (!clientRequestId) return null;
+  return prisma.report.findFirst({
+    where: { userId, clientRequestId },
+    include: reportInclude,
+  });
+};
+
 exports.createReportService = async (user, data, files) => {
-  const userId = user._id;
+  const userId = userIdOf(user);
   const clientRequestId = typeof data.clientRequestId === "string" ? data.clientRequestId.trim() : "";
   const incidentDate = typeof data.date === "string" ? data.date.trim() : "";
 
@@ -50,19 +68,21 @@ exports.createReportService = async (user, data, files) => {
   }
 
   if (clientRequestId) {
-    const existingReport = await Report.findOne({ userId, clientRequestId }).populate("evidenceIds");
+    const existingReport = await findDuplicateReport(userId, clientRequestId);
     if (existingReport) {
-      console.log("[createReportService] Duplicate request detected, returning existing report:", existingReport.caseId);
-      return {
-        report: existingReport,
-        evidenceIds: existingReport.evidenceIds || [],
-        ai: null,
-        duplicate: true
-      };
+      console.log(
+        "[createReportService] Duplicate request detected, returning existing report:",
+        existingReport.caseId
+      );
+      return formatServiceResult(
+        existingReport,
+        existingReport.evidence || [],
+        existingReport.aiAnalysis,
+        true
+      );
     }
   }
 
-  // Parse location (accepts either lat/lng or location string)
   let coordinates = [0, 0];
   let address = "";
   if (data.lng && data.lat) {
@@ -90,89 +110,103 @@ exports.createReportService = async (user, data, files) => {
     throw error;
   }
 
-  // Create report with generated case ID and initial status history
+  const statusHistory = [
+    {
+      status: "pending",
+      changedBy: userId,
+      changedByRole: user.role,
+      changedAt: new Date().toISOString(),
+      reason: "Report created",
+    },
+  ];
+
   let report;
   try {
-    report = await Report.create({
-      caseId: generateCaseId(),
-      userId,
-      clientRequestId: clientRequestId || undefined,
-      policeStationId: user.policeStationId || data.policeStationId,
-      preferredNgoId: user.preferredNgoId || data.preferredNgoId,
-      description: data.description,
-      incidentType: data.incidentType,
-      location: {
-        type: "Point",
-        coordinates,
-        address
-      },
-      status: "pending",
-      statusHistory: [{
+    report = await prisma.report.create({
+      data: {
+        caseId: generateCaseId(),
+        userId,
+        clientRequestId: clientRequestId || null,
+        policeStationId: user.policeStationId || data.policeStationId || null,
+        preferredNgoId: user.preferredNgoId || data.preferredNgoId || null,
+        description: data.description || null,
+        incidentType: data.incidentType || null,
+        location: {
+          type: "Point",
+          coordinates,
+          address,
+        },
         status: "pending",
-        changedBy: user._id,
-        changedByRole: user.role,
-        changedAt: new Date(),
-        reason: "Report created"
-      }]
+        statusHistory,
+      },
+      include: reportInclude,
     });
   } catch (err) {
-    if (err && err.code === 11000 && clientRequestId) {
-      const existingReport = await Report.findOne({ userId, clientRequestId }).populate("evidenceIds");
+    if (err?.code === "P2002" && clientRequestId) {
+      const existingReport = await findDuplicateReport(userId, clientRequestId);
       if (existingReport) {
-        console.log("[createReportService] Duplicate request raced, returning existing report:", existingReport.caseId);
-        return {
-          report: existingReport,
-          evidenceIds: existingReport.evidenceIds || [],
-          ai: null,
-          duplicate: true
-        };
+        console.log(
+          "[createReportService] Duplicate request raced, returning existing report:",
+          existingReport.caseId
+        );
+        return formatServiceResult(
+          existingReport,
+          existingReport.evidence || [],
+          existingReport.aiAnalysis,
+          true
+        );
       }
     }
     throw err;
   }
 
-  // Save evidence files
-  let evidenceIds = [];
   let evidenceDocuments = [];
   if (files && files.length > 0) {
     for (const file of files) {
       const type = file.mimetype.startsWith("image/")
         ? "image"
         : file.mimetype.startsWith("video/")
-        ? "video"
-        : file.mimetype.startsWith("audio/")
-        ? "audio"
-        : "document";
+          ? "video"
+          : file.mimetype.startsWith("audio/")
+            ? "audio"
+            : "document";
       const fileUrl = `/uploads/${path.basename(file.path)}`;
-      const evidence = await Evidence.create({
-        reportId: report._id,
-        fileUrl,
-        name: file.originalname,
-        type
+      const evidence = await prisma.evidence.create({
+        data: {
+          reportId: report.id,
+          fileUrl,
+          name: file.originalname,
+          type,
+          userId,
+        },
       });
-      evidenceIds.push(evidence._id);
       evidenceDocuments.push(evidence);
     }
   }
 
-  // Update report with evidence references
-  report.evidenceIds = evidenceIds;
-  await report.save();
-
   console.log("💾 [reportService] Report saved - userId field:", report.userId);
-  console.log("💾 [reportService] Report saved - userId type:", typeof report.userId);
-  console.log("💾 [reportService] Full report object keys:", Object.keys(report.toObject ? report.toObject() : report));
 
-  // Optionally, create AI analysis
-  const ai = await AIAnalysis.create({
-    reportId: report._id,
-    riskLevel: "high",
-    insights: "Auto-detected urgent case"
+  const ai = await prisma.aiAnalysis.create({
+    data: {
+      reportId: report.id,
+      riskLevel: "high",
+      insights: "Auto-detected urgent case",
+    },
   });
 
-  return { report, evidenceIds: evidenceDocuments, ai };
+  const reportWithEvidence = {
+    ...report,
+    evidence: evidenceDocuments,
+  };
+
+  return formatServiceResult(reportWithEvidence, evidenceDocuments, ai);
 };
 
-exports.getAllReports = async (userId) => {
-  return await Report.find({ userId }).populate("userId evidenceIds");
-};
+exports.getAllReports = async (userId) =>
+  prisma.report.findMany({
+    where: { userId },
+    include: reportInclude,
+    orderBy: { createdAt: "desc" },
+  });
+
+exports.reportInclude = reportInclude;

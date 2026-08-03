@@ -1,4 +1,4 @@
-const AuditLog = require("../models/auditLogs");
+const prisma = require("../config/prisma");
 
 exports.logAudit = async ({
   user,
@@ -7,20 +7,22 @@ exports.logAudit = async ({
   resourceId,
   resourceLabel,
   details,
-  metadata
+  metadata,
 }) => {
   try {
-    return await AuditLog.create({
-      userId: user?._id || user?.id || null,
-      actorName: user?.fullName || user?.name || "",
-      actorEmail: user?.email || "",
-      actorRole: user?.role || "",
-      action,
-      resourceType,
-      resourceId: resourceId ? resourceId.toString() : "",
-      resourceLabel,
-      details,
-      metadata
+    return await prisma.auditLog.create({
+      data: {
+        userId: user?.id || user?._id || null,
+        actorName: user?.fullName || user?.name || "",
+        actorEmail: user?.email || "",
+        actorRole: user?.role || "",
+        action,
+        resourceType,
+        resourceId: resourceId ? String(resourceId) : "",
+        resourceLabel,
+        details,
+        metadata: metadata || undefined,
+      },
     });
   } catch (err) {
     console.error("Audit log failed:", err);

@@ -1,23 +1,29 @@
-const Alert = require("../models/alert");
-const Case = require("../models/case");
-const Notification = require("../models/notifications");
+const prisma = require("../config/prisma");
+const { serializeAlert, userIdOf } = require("../lib/serialize");
 const { logAudit } = require("../services/auditService");
+
+const ALERT_INCLUDE = {
+  user: true,
+  case: true,
+  acknowledgedBy: true,
+};
+
+const EMPTY_FILTER = { id: { in: [] } };
 
 const getAlertQueryFilter = (user) => {
   if (user.role === "authority" || user.role === "officer") {
-    if (!user.policeStationId) return { _id: null };
-    const stationId = String(user.policeStationId);
-    return { policeStationId: stationId };
+    if (!user.policeStationId) return EMPTY_FILTER;
+    return { policeStationId: String(user.policeStationId) };
   }
-  return { userId: user._id || user.id };
+  return { userId: userIdOf(user) };
 };
 
 const getSystemAlertFilter = (user) => {
   if (user.role === "authority" || user.role === "officer") {
-    if (!user.policeStationId) return { _id: null };
+    if (!user.policeStationId) return EMPTY_FILTER;
     return { policeStationId: String(user.policeStationId) };
   }
-  return { _id: null };
+  return EMPTY_FILTER;
 };
 
 const buildLocationUpdate = (body, currentLocation = {}) => {
@@ -59,22 +65,30 @@ const buildLocationUpdate = (body, currentLocation = {}) => {
   return location;
 };
 
+const fetchAlert = (id) =>
+  prisma.alert.findUnique({
+    where: { id },
+    include: ALERT_INCLUDE,
+  });
+
 exports.getResolvedAlerts = async (req, res) => {
   try {
     const stationFilter = getAlertQueryFilter(req.user);
-    const alerts = await Alert.find({ ...stationFilter, status: "resolved" })
-      .populate("userId caseId acknowledgedBy")
-      .sort({ createdAt: -1 });
+    const alerts = await prisma.alert.findMany({
+      where: { ...stationFilter, status: "resolved" },
+      include: ALERT_INCLUDE,
+      orderBy: { createdAt: "desc" },
+    });
     res.json({
       success: true,
       total: alerts.length,
-      alerts
+      alerts: alerts.map(serializeAlert),
     });
   } catch (error) {
     console.error("Error fetching resolved alerts:", error);
     res.status(500).json({
       error: "Failed to fetch resolved alerts",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -82,19 +96,24 @@ exports.getResolvedAlerts = async (req, res) => {
 exports.getAllActiveAlerts = async (req, res) => {
   try {
     const stationFilter = getAlertQueryFilter(req.user);
-    const alerts = await Alert.find({ ...stationFilter, status: { $in: ["active", "call initiated"] } })
-      .populate("userId caseId acknowledgedBy")
-      .sort({ createdAt: -1 });
+    const alerts = await prisma.alert.findMany({
+      where: {
+        ...stationFilter,
+        status: { in: ["active", "call initiated"] },
+      },
+      include: ALERT_INCLUDE,
+      orderBy: { createdAt: "desc" },
+    });
     res.json({
       success: true,
       total: alerts.length,
-      alerts
+      alerts: alerts.map(serializeAlert),
     });
   } catch (error) {
     console.error("Error fetching all active alerts:", error);
     res.status(500).json({
       error: "Failed to fetch active alerts",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -106,34 +125,38 @@ exports.createAlert = async (req, res) => {
 
     if (!latitude || !longitude) {
       return res.status(400).json({
-        error: "Latitude and longitude are required"
+        error: "Latitude and longitude are required",
       });
     }
 
-    const alert = await Alert.create({
-      userId,
-      caseId: caseId || null,
-      policeStationId: req.user.policeStationId || null,
-      location: {
-        type: "Point",
-        coordinates: [longitude, latitude],
-        address: address || "Location captured",
-        accuracy: accuracy || null
+    const alert = await prisma.alert.create({
+      data: {
+        userId,
+        caseId: caseId || null,
+        policeStationId: req.user.policeStationId || null,
+        location: {
+          type: "Point",
+          coordinates: [longitude, latitude],
+          address: address || "Location captured",
+          accuracy: accuracy || null,
+        },
+        type: type || "sos",
+        status: "active",
       },
-      type: type || "sos",
-      status: "active"
     });
+
+    const populated = await fetchAlert(alert.id);
 
     res.status(201).json({
       success: true,
       message: "Alert created successfully",
-      alert: await alert.populate("userId caseId")
+      alert: serializeAlert(populated),
     });
   } catch (error) {
     console.error("Error creating alert:", error);
     res.status(500).json({
       error: "Failed to create alert",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -141,120 +164,132 @@ exports.createAlert = async (req, res) => {
 exports.triggerAlert = async (req, res) => {
   const { lat, lng } = req.body;
 
-  const alert = await Alert.create({
-    userId: req.user.id,
-    policeStationId: req.user.policeStationId || null,
-    location: {
-      type: "Point",
-      coordinates: [lng, lat]
-    }
+  const alert = await prisma.alert.create({
+    data: {
+      userId: req.user.id,
+      policeStationId: req.user.policeStationId || null,
+      location: {
+        type: "Point",
+        coordinates: [lng, lat],
+      },
+    },
   });
 
-  // Notify authorities (simplified)
-  await Notification.create({
-    userId: req.user.id,
-    message: "Emergency alert triggered"
+  await prisma.notification.create({
+    data: {
+      userId: req.user.id,
+      message: "Emergency alert triggered",
+    },
   });
 
-  res.json(alert);
+  res.json(serializeAlert(alert));
 };
 
 exports.updateAlertStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const existingAlert = await Alert.findById(req.params.id);
+    const existingAlert = await prisma.alert.findUnique({
+      where: { id: req.params.id },
+    });
     const oldStatus = existingAlert?.status || "";
-    const updateData = { status };
 
+    const updateData = { status };
     if (status === "resolved") {
       updateData.resolvedAt = new Date();
     } else if (status === "call initiated" || status === "acknowledged") {
-      updateData.acknowledgedBy = req.user.id;
+      updateData.acknowledgedById = req.user.id;
       updateData.acknowledgedAt = new Date();
     }
 
-    const alert = await Alert.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    ).populate("userId caseId acknowledgedBy");
+    await prisma.alert.update({
+      where: { id: req.params.id },
+      data: updateData,
+    });
+
+    const alert = await fetchAlert(req.params.id);
 
     if (alert) {
       await logAudit({
         user: req.user,
         action: "case_status_changed",
         resourceType: "alert",
-        resourceId: alert._id,
-        resourceLabel: alert.caseId?.caseId || alert._id.toString(),
+        resourceId: alert.id,
+        resourceLabel: alert.case?.caseId || alert.id,
         details: `Changed alert status from ${oldStatus || "unknown"} to ${status}`,
-        metadata: { oldStatus, newStatus: status }
+        metadata: { oldStatus, newStatus: status },
       });
     }
 
     res.json({
       success: true,
       message: `Alert status updated to ${status}`,
-      alert
+      alert: serializeAlert(alert),
     });
   } catch (error) {
     console.error("Error updating alert status:", error);
     res.status(500).json({
       error: "Failed to update alert status",
-      details: error.message
+      details: error.message,
     });
   }
 };
 
 exports.updateAlertLocation = async (req, res) => {
   try {
-    const alert = await Alert.findById(req.params.id);
+    const alert = await prisma.alert.findUnique({
+      where: { id: req.params.id },
+    });
 
     if (!alert) {
       return res.status(404).json({ error: "Alert not found" });
     }
 
-    if (alert.userId.toString() !== req.user.id) {
+    if (alert.userId !== req.user.id) {
       return res.status(403).json({ error: "You can only update the location for your own alert" });
     }
 
     const location = buildLocationUpdate(req.body, alert.location || {});
-    alert.location = location;
-    await alert.save();
+
+    await prisma.alert.update({
+      where: { id: alert.id },
+      data: { location },
+    });
+
     await logAudit({
       user: req.user,
       action: "location_updated",
       resourceType: "alert",
-      resourceId: alert._id,
-      resourceLabel: alert.caseId ? alert.caseId.toString() : alert._id.toString(),
+      resourceId: alert.id,
+      resourceLabel: alert.caseId ? alert.caseId.toString() : alert.id,
       details: "Updated alert location",
-      metadata: { location }
+      metadata: { location },
     });
 
     if (alert.caseId) {
-      await Case.findOneAndUpdate(
-        { _id: alert.caseId, userId: req.user.id },
-        { location },
-        { new: true }
-      );
+      await prisma.case.updateMany({
+        where: { id: alert.caseId, userId: req.user.id },
+        data: { location },
+      });
     }
 
-    await alert.populate("userId caseId acknowledgedBy");
+    const populated = await fetchAlert(alert.id);
+    const serialized = serializeAlert(populated);
 
     const io = req.app.locals.io;
     if (io) {
       io.emit("alertLocationUpdated", {
-        alertId: alert._id,
-        caseId: alert.caseId?._id || alert.caseId,
-        location: alert.location,
-        updatedAt: alert.updatedAt,
-        userId: alert.userId._id,
+        alertId: alert.id,
+        caseId: populated.case?.id || alert.caseId,
+        location,
+        updatedAt: populated.updatedAt,
+        userId: populated.user?.id || alert.userId,
       });
     }
 
     res.json({
       success: true,
       message: "Alert location updated",
-      alert,
+      alert: serialized,
     });
   } catch (error) {
     if (error.statusCode) {
@@ -264,96 +299,102 @@ exports.updateAlertLocation = async (req, res) => {
     console.error("Error updating alert location:", error);
     res.status(500).json({
       error: "Failed to update alert location",
-      details: error.message
+      details: error.message,
     });
   }
 };
 
 exports.resolveAlert = async (req, res) => {
   try {
-    const existingAlert = await Alert.findById(req.params.id);
-    const alert = await Alert.findByIdAndUpdate(
-      req.params.id,
-      { 
+    const existingAlert = await prisma.alert.findUnique({
+      where: { id: req.params.id },
+    });
+
+    await prisma.alert.update({
+      where: { id: req.params.id },
+      data: {
         status: "resolved",
-        resolvedAt: new Date()
+        resolvedAt: new Date(),
       },
-      { new: true }
-    ).populate("userId caseId acknowledgedBy");
+    });
+
+    const alert = await fetchAlert(req.params.id);
 
     if (alert) {
       await logAudit({
         user: req.user,
         action: "case_status_changed",
         resourceType: "alert",
-        resourceId: alert._id,
-        resourceLabel: alert.caseId?.caseId || alert._id.toString(),
+        resourceId: alert.id,
+        resourceLabel: alert.case?.caseId || alert.id,
         details: `Changed alert status from ${existingAlert?.status || "unknown"} to resolved`,
-        metadata: { oldStatus: existingAlert?.status || "", newStatus: "resolved" }
+        metadata: { oldStatus: existingAlert?.status || "", newStatus: "resolved" },
       });
     }
 
     res.json({
       success: true,
       message: "Alert resolved",
-      alert
+      alert: serializeAlert(alert),
     });
   } catch (error) {
     console.error("Error resolving alert:", error);
     res.status(500).json({
       error: "Failed to resolve alert",
-      details: error.message
+      details: error.message,
     });
   }
 };
 
 exports.getAlert = async (req, res) => {
   try {
-    const alert = await Alert.findById(req.params.id)
-      .populate("userId caseId acknowledgedBy");
-    
+    const alert = await fetchAlert(req.params.id);
+
     if (!alert) {
       return res.status(404).json({
-        error: "Alert not found"
+        error: "Alert not found",
       });
     }
 
     res.json({
       success: true,
-      alert
+      alert: serializeAlert(alert),
     });
   } catch (error) {
     console.error("Error fetching alert:", error);
     res.status(500).json({
       error: "Failed to fetch alert",
-      details: error.message
+      details: error.message,
     });
   }
 };
+
 exports.getUserAlerts = async (req, res) => {
   try {
     const userId = req.user.id;
     const { status } = req.query;
 
-    const query = { userId };
+    const where = { userId };
     if (status) {
-      query.status = status;
+      where.status = status;
     }
 
-    const alerts = await Alert.find(query)
-      .populate("userId caseId acknowledgedBy")
-      .sort({ createdAt: -1 });
+    const alerts = await prisma.alert.findMany({
+      where,
+      include: ALERT_INCLUDE,
+      orderBy: { createdAt: "desc" },
+    });
 
     res.json({
       success: true,
       total: alerts.length,
-      alerts
+      alerts: alerts.map(serializeAlert),
     });
   } catch (error) {
     console.error("Error fetching user alerts:", error);
     res.status(500).json({
       error: "Failed to fetch alerts",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -362,23 +403,25 @@ exports.getAlertStats = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const totalAlerts = await Alert.countDocuments({ userId });
-    const activeAlerts = await Alert.countDocuments({ userId, status: "active" });
-    const resolvedAlerts = await Alert.countDocuments({ userId, status: "resolved" });
+    const [totalAlerts, activeAlerts, resolvedAlerts] = await Promise.all([
+      prisma.alert.count({ where: { userId } }),
+      prisma.alert.count({ where: { userId, status: "active" } }),
+      prisma.alert.count({ where: { userId, status: "resolved" } }),
+    ]);
 
     res.json({
       success: true,
       stats: {
         total: totalAlerts,
         active: activeAlerts,
-        resolved: resolvedAlerts
-      }
+        resolved: resolvedAlerts,
+      },
     });
   } catch (error) {
     console.error("Error fetching alert stats:", error);
     res.status(500).json({
       error: "Failed to fetch alert stats",
-      details: error.message
+      details: error.message,
     });
   }
 };
@@ -387,49 +430,61 @@ exports.getSystemAlertStats = async (req, res) => {
   try {
     const stationFilter = getSystemAlertFilter(req.user);
 
-    const activeAlerts = await Alert.countDocuments({
-      ...stationFilter,
-      status: { $in: ["active", "call initiated"] }
-    });
-    const resolvedAlerts = await Alert.countDocuments({
-      ...stationFilter,
-      status: "resolved"
-    });
+    const [activeAlerts, resolvedAlerts] = await Promise.all([
+      prisma.alert.count({
+        where: {
+          ...stationFilter,
+          status: { in: ["active", "call initiated"] },
+        },
+      }),
+      prisma.alert.count({
+        where: {
+          ...stationFilter,
+          status: "resolved",
+        },
+      }),
+    ]);
 
     res.json({
       success: true,
       active: activeAlerts,
-      resolved: resolvedAlerts
+      resolved: resolvedAlerts,
     });
   } catch (error) {
     console.error("Error fetching system alert stats:", error);
     res.status(500).json({
       error: "Failed to fetch system alert stats",
-      details: error.message
+      details: error.message,
     });
   }
 };
 
 exports.deleteAlert = async (req, res) => {
   try {
-    const alert = await Alert.findByIdAndDelete(req.params.id);
+    const existing = await prisma.alert.findUnique({
+      where: { id: req.params.id },
+    });
 
-    if (!alert) {
+    if (!existing) {
       return res.status(404).json({
-        error: "Alert not found"
+        error: "Alert not found",
       });
     }
+
+    const alert = await prisma.alert.delete({
+      where: { id: req.params.id },
+    });
 
     res.json({
       success: true,
       message: "Alert deleted successfully",
-      alert
+      alert: serializeAlert(alert),
     });
   } catch (error) {
     console.error("Error deleting alert:", error);
     res.status(500).json({
       error: "Failed to delete alert",
-      details: error.message
+      details: error.message,
     });
   }
 };

@@ -1,71 +1,80 @@
-const User = require("../models/users");
-const Report = require("../models/report");
-const Alert = require("../models/alert");
-const Case = require("../models/case");
-const Evidence = require("../models/evidence");
-const AuditLog = require("../models/auditLogs");
-const PoliceStation = require("../models/policeStation");
-const NgoOrg = require("../models/ngoOrg");
-const AuthSession = require("../models/authSessions");
-const EmergencyContact = require("../models/emergencyContacts");
-const LiveLocation = require("../models/liveLocation");
-const Notification = require("../models/notifications");
-const TrackingSession = require("../models/tracking");
-const ReporterProfile = require("../models/reporterProfile");
-const PoliceOfficerProfile = require("../models/policeOfficerProfile");
-const NgoProfile = require("../models/ngoProfile");
-const AdminProfile = require("../models/adminProfile");
+const prisma = require("../config/prisma");
 const { logAudit } = require("../services/auditService");
 const { isSoshanguvePoliceStation, containsSoshanguve } = require("../constants/soshanguve");
+const {
+  serializeUser,
+  serializeReport,
+  serializeAlert,
+  serializeOrg,
+  withId,
+  userIdOf,
+} = require("../lib/serialize");
 
 const normalizeText = (value = "") => String(value).trim().replace(/\s+/g, " ");
-const normalizeCode = (value = "") => String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-
-const organizationModels = {
-  police_station: PoliceStation,
-  ngo: NgoOrg,
-};
+const normalizeCode = (value = "") =>
+  String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 
 const normalizeOrganization = (doc, type) => ({
-  ...doc,
+  ...serializeOrg(doc),
   type,
 });
 
+const serializeAuditLog = (log) => {
+  if (!log) return log;
+  const plain = withId(log);
+  if (plain.user) {
+    plain.userId = serializeUser(plain.user);
+    delete plain.user;
+  }
+  return plain;
+};
+
+const findOrganizationById = async (id, type) => {
+  if (type === "police_station") {
+    const doc = await prisma.policeStation.findUnique({ where: { id } });
+    return doc ? { doc, type: "police_station" } : null;
+  }
+  if (type === "ngo") {
+    const doc = await prisma.ngoOrg.findUnique({ where: { id } });
+    return doc ? { doc, type: "ngo" } : null;
+  }
+
+  const policeStation = await prisma.policeStation.findUnique({ where: { id } });
+  if (policeStation) return { doc: policeStation, type: "police_station" };
+
+  const ngo = await prisma.ngoOrg.findUnique({ where: { id } });
+  if (ngo) return { doc: ngo, type: "ngo" };
+
+  return null;
+};
+
 const getOrganizationsByType = async (type, query = {}) => {
-  if (type) {
-    const Model = organizationModels[type];
-    if (!Model) return [];
-    let docs = await Model.find(query).sort({ name: 1 }).lean();
-    if (type === "police_station") {
-      docs = docs.filter(isSoshanguvePoliceStation);
-    }
-    return docs.map((doc) => normalizeOrganization(doc, type));
+  const where = {};
+  if (query.active !== undefined) where.active = query.active;
+
+  if (type === "police_station") {
+    const docs = await prisma.policeStation.findMany({ where, orderBy: { name: "asc" } });
+    return docs.filter(isSoshanguvePoliceStation).map((doc) => normalizeOrganization(doc, "police_station"));
+  }
+
+  if (type === "ngo") {
+    const docs = await prisma.ngoOrg.findMany({ where, orderBy: { name: "asc" } });
+    return docs.map((doc) => normalizeOrganization(doc, "ngo"));
   }
 
   const [policeStations, ngos] = await Promise.all([
-    PoliceStation.find(query).sort({ name: 1 }).lean(),
-    NgoOrg.find(query).sort({ name: 1 }).lean(),
+    prisma.policeStation.findMany({ where, orderBy: { name: "asc" } }),
+    prisma.ngoOrg.findMany({ where, orderBy: { name: "asc" } }),
   ]);
 
   return [
     ...policeStations.filter(isSoshanguvePoliceStation).map((doc) => normalizeOrganization(doc, "police_station")),
     ...ngos.map((doc) => normalizeOrganization(doc, "ngo")),
   ].sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
-};
-
-const findOrganizationById = async (id, type) => {
-  if (type && organizationModels[type]) {
-    const doc = await organizationModels[type].findById(id);
-    return doc ? { doc, type } : null;
-  }
-
-  const policeStation = await PoliceStation.findById(id);
-  if (policeStation) return { doc: policeStation, type: "police_station" };
-
-  const ngo = await NgoOrg.findById(id);
-  if (ngo) return { doc: ngo, type: "ngo" };
-
-  return null;
 };
 
 const roleFilters = {
@@ -75,76 +84,124 @@ const roleFilters = {
   admin: ["admin"],
 };
 
-exports.getDashboard = async (req, res) => {
-  const [
-    users,
-    reports,
-    alerts,
-    resolvedReports,
-    pendingReports,
-    activeAlerts,
-    resolvedCases,
-    pendingCases,
-    recentActivity,
-    recentUsers,
-    recentReports,
-    recentAlerts
-  ] = await Promise.all([
-    User.countDocuments(),
-    Report.countDocuments(),
-    Alert.countDocuments(),
-    Report.countDocuments({ status: "resolved" }),
-    Report.countDocuments({ status: { $in: ["pending", "new", "investigating", "referred_to_ngo", "call_initiated", "arranged_counselling"] } }),
-    Alert.countDocuments({ status: { $in: ["active", "call initiated", "acknowledged"] } }),
-    Case.countDocuments({ status: { $in: ["resolved", "closed"] } }),
-    Case.countDocuments({ status: { $in: ["active", "assigned"] } }),
-    AuditLog.find({
-      $or: [
-        { userId: req.user._id },
-        { actorEmail: req.user.email, actorRole: "admin" }
-      ]
-    }).sort({ createdAt: -1 }).limit(8).populate("userId", "fullName email role"),
-    User.find().sort({ createdAt: -1 }).limit(5).select("fullName email role createdAt"),
-    Report.find().sort({ createdAt: -1 }).limit(5).select("caseId incidentType status createdAt"),
-    Alert.find().sort({ createdAt: -1 }).limit(5).select("type status createdAt")
-  ]);
+const reportPendingStatuses = [
+  "pending",
+  "new",
+  "investigating",
+  "referred_to_ngo",
+  "call_initiated",
+  "arranged_counselling",
+];
 
-  res.json({
-    totals: {
+const alertActiveStatuses = ["active", "call initiated", "acknowledged"];
+
+exports.getDashboard = async (req, res, next) => {
+  try {
+    const adminId = userIdOf(req.user);
+    const adminEmail = req.user.email;
+
+    const [
       users,
       reports,
       alerts,
-      resolvedCases: resolvedReports + resolvedCases,
-      pendingCases: pendingReports + pendingCases,
-      activeSosAlerts: activeAlerts
-    },
-    health: {
-      status: "online",
-      database: ["disconnected", "connected", "connecting", "disconnecting"][User.db.readyState] || "unknown",
-      uptimeSeconds: Math.floor(process.uptime()),
-      checkedAt: new Date()
-    },
-    recentActivity,
-    recentUsers,
-    recentReports,
-    recentAlerts
-  });
+      resolvedReports,
+      pendingReports,
+      activeAlerts,
+      resolvedCases,
+      pendingCases,
+      recentActivity,
+      recentUsers,
+      recentReports,
+      recentAlerts,
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.report.count(),
+      prisma.alert.count(),
+      prisma.report.count({ where: { status: "resolved" } }),
+      prisma.report.count({ where: { status: { in: reportPendingStatuses } } }),
+      prisma.alert.count({ where: { status: { in: alertActiveStatuses } } }),
+      prisma.case.count({ where: { status: { in: ["resolved", "closed"] } } }),
+      prisma.case.count({ where: { status: { in: ["active", "assigned"] } } }),
+      prisma.auditLog.findMany({
+        where: {
+          OR: [{ userId: adminId }, { actorEmail: adminEmail, actorRole: "admin" }],
+        },
+        include: {
+          user: { select: { id: true, fullName: true, email: true, role: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 8,
+      }),
+      prisma.user.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: { id: true, fullName: true, email: true, role: true, createdAt: true },
+      }),
+      prisma.report.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: { id: true, caseId: true, incidentType: true, status: true, createdAt: true },
+      }),
+      prisma.alert.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: { id: true, type: true, status: true, createdAt: true },
+      }),
+    ]);
+
+    let databaseStatus = "connected";
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch {
+      databaseStatus = "disconnected";
+    }
+
+    res.json({
+      totals: {
+        users,
+        reports,
+        alerts,
+        resolvedCases: resolvedReports + resolvedCases,
+        pendingCases: pendingReports + pendingCases,
+        activeSosAlerts: activeAlerts,
+      },
+      health: {
+        status: "online",
+        database: databaseStatus,
+        uptimeSeconds: Math.floor(process.uptime()),
+        checkedAt: new Date(),
+      },
+      recentActivity: recentActivity.map(serializeAuditLog),
+      recentUsers: recentUsers.map(serializeUser),
+      recentReports: recentReports.map(serializeReport),
+      recentAlerts: recentAlerts.map(serializeAlert),
+    });
+  } catch (err) {
+    next(err);
+  }
 };
 
 exports.getUsers = async (req, res, next) => {
   try {
     const roleGroup = req.query.role;
-    const query = roleGroup && roleFilters[roleGroup] ? { role: { $in: roleFilters[roleGroup] } } : {};
-    const users = await User.find(query)
-      .select("-password -resetPasswordToken -resetPasswordExpires")
-      .sort({ accountDeletionRequestedAt: -1, createdAt: -1 })
-      .limit(250)
-      .lean();
+    const where =
+      roleGroup && roleFilters[roleGroup] ? { role: { in: roleFilters[roleGroup] } } : {};
 
-    const sessions = await AuthSession.find({ userId: { $in: users.map((user) => user._id) } })
-      .select("userId expiresAt")
-      .sort({ _id: -1 })
-      .lean();
+    const users = await prisma.user.findMany({
+      where,
+      orderBy: [{ accountDeletionRequestedAt: "desc" }, { createdAt: "desc" }],
+      take: 250,
+    });
+
+    const userIds = users.map((user) => user.id);
+    const sessions =
+      userIds.length > 0
+        ? await prisma.authSession.findMany({
+            where: { userId: { in: userIds } },
+            select: { userId: true, expiresAt: true, createdAt: true },
+            orderBy: { createdAt: "desc" },
+          })
+        : [];
 
     const latestSessionByUser = new Map();
     sessions.forEach((session) => {
@@ -154,14 +211,17 @@ exports.getUsers = async (req, res, next) => {
       }
     });
 
-    res.json(users.map((user) => {
-      const latestSession = latestSessionByUser.get(String(user._id));
-      return {
-        ...user,
-        lastLoginAt: latestSession?._id?.getTimestamp?.() || null,
-        lastLoginSessionExpiresAt: latestSession?.expiresAt || null
-      };
-    }));
+    res.json(
+      users.map((user) => {
+        const serialized = serializeUser(user);
+        const latestSession = latestSessionByUser.get(String(user.id));
+        return {
+          ...serialized,
+          lastLoginAt: latestSession?.createdAt || null,
+          lastLoginSessionExpiresAt: latestSession?.expiresAt || null,
+        };
+      })
+    );
   } catch (err) {
     next(err);
   }
@@ -173,7 +233,7 @@ exports.deleteUserPermanently = async (req, res, next) => {
       return res.status(400).json({ message: "You cannot permanently delete your own admin account." });
     }
 
-    const user = await User.findById(req.params.id);
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) {
       return res.status(404).json({ message: "User not found." });
     }
@@ -182,41 +242,19 @@ exports.deleteUserPermanently = async (req, res, next) => {
       user: req.user,
       action: "user_permanently_deleted",
       resourceType: "user",
-      resourceId: user._id,
+      resourceId: user.id,
       resourceLabel: user.email,
       details: `Permanently deleted user account ${user.email}`,
       metadata: {
         deletedUserRole: user.role,
-        deletionRequestedAt: user.accountDeletionRequestedAt || null
-      }
+        deletionRequestedAt: user.accountDeletionRequestedAt || null,
+      },
     });
 
-    const [userReports] = await Promise.all([
-      Report.find({ userId: user._id }).select("_id evidenceIds").lean(),
-    ]);
-    const userReportIds = userReports.map((report) => report._id);
-    const evidenceIds = userReports.flatMap((report) => report.evidenceIds || []);
-
-    await Promise.all([
-      AuthSession.deleteMany({ userId: user._id }),
-      EmergencyContact.deleteMany({ userId: user._id }),
-      LiveLocation.deleteMany({ userId: user._id }),
-      Notification.deleteMany({ userId: user._id }),
-      TrackingSession.deleteMany({ userId: user._id }),
-      Alert.deleteMany({ userId: user._id }),
-      Case.deleteMany({ $or: [{ userId: user._id }, { assignedTo: user._id }] }),
-      Report.deleteMany({ userId: user._id }),
-      Evidence.deleteMany({
-        $or: [
-          { _id: { $in: evidenceIds } },
-          { reportId: { $in: userReportIds } }
-        ]
-      }),
-      ReporterProfile.deleteOne({ userId: user._id }),
-      PoliceOfficerProfile.deleteOne({ userId: user._id }),
-      NgoProfile.deleteOne({ userId: user._id }),
-      AdminProfile.deleteOne({ userId: user._id }),
-      User.findByIdAndDelete(user._id)
+    await prisma.$transaction([
+      prisma.evidence.deleteMany({ where: { userId: user.id } }),
+      prisma.case.deleteMany({ where: { assignedToId: user.id } }),
+      prisma.user.delete({ where: { id: user.id } }),
     ]);
 
     res.json({ success: true, message: "User permanently deleted." });
@@ -227,12 +265,15 @@ exports.deleteUserPermanently = async (req, res, next) => {
 
 exports.getAuditLogs = async (req, res, next) => {
   try {
-    const logs = await AuditLog.find()
-      .populate("userId", "fullName email role")
-      .sort({ createdAt: -1 })
-      .limit(200);
+    const logs = await prisma.auditLog.findMany({
+      include: {
+        user: { select: { id: true, fullName: true, email: true, role: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
 
-    res.json(logs);
+    res.json(logs.map(serializeAuditLog));
   } catch (err) {
     next(err);
   }
@@ -241,7 +282,7 @@ exports.getAuditLogs = async (req, res, next) => {
 exports.getPublicOrganizations = async (req, res, next) => {
   try {
     const type = req.query.type;
-    if (type && !organizationModels[type]) {
+    if (type && !["police_station", "ngo"].includes(type)) {
       return res.status(400).json({ message: "Organization type must be police_station or ngo." });
     }
 
@@ -255,7 +296,7 @@ exports.getPublicOrganizations = async (req, res, next) => {
 exports.getOrganizations = async (req, res, next) => {
   try {
     const type = req.query.type;
-    if (type && !organizationModels[type]) {
+    if (type && !["police_station", "ngo"].includes(type)) {
       return res.status(400).json({ message: "Organization type must be police_station or ngo." });
     }
 
@@ -286,28 +327,32 @@ exports.createOrganization = async (req, res, next) => {
       });
     }
 
-    const Model = organizationModels[type];
-    const organization = await Model.create({
+    const data = {
       name,
       code,
       phone: normalizeText(req.body.phone),
       email: normalizeText(req.body.email).toLowerCase(),
       address: normalizeText(req.body.address),
-      active: req.body.active !== false
-    });
+      active: req.body.active !== false,
+    };
+
+    const organization =
+      type === "police_station"
+        ? await prisma.policeStation.create({ data })
+        : await prisma.ngoOrg.create({ data });
 
     await logAudit({
       user: req.user,
       action: "organization_created",
       resourceType: type,
-      resourceId: organization._id,
+      resourceId: organization.id,
       resourceLabel: organization.name,
       details: `Created ${type === "police_station" ? "police station" : "NGO"} ${organization.name}`,
     });
 
-    res.status(201).json(normalizeOrganization(organization.toObject(), type));
+    res.status(201).json(normalizeOrganization(organization, type));
   } catch (err) {
-    if (err?.code === 11000) {
+    if (err?.code === "P2002") {
       return res.status(409).json({ message: "An organization with this code already exists for this type." });
     }
     next(err);
@@ -317,7 +362,7 @@ exports.createOrganization = async (req, res, next) => {
 exports.updateOrganization = async (req, res, next) => {
   try {
     const requestedType = req.body.type;
-    if (requestedType && !organizationModels[requestedType]) {
+    if (requestedType && !["police_station", "ngo"].includes(requestedType)) {
       return res.status(400).json({ message: "Organization type must be police_station or ngo." });
     }
 
@@ -325,28 +370,34 @@ exports.updateOrganization = async (req, res, next) => {
     if (Object.prototype.hasOwnProperty.call(req.body, "name")) updateFields.name = normalizeText(req.body.name);
     if (Object.prototype.hasOwnProperty.call(req.body, "code")) updateFields.code = normalizeCode(req.body.code);
     if (Object.prototype.hasOwnProperty.call(req.body, "phone")) updateFields.phone = normalizeText(req.body.phone);
-    if (Object.prototype.hasOwnProperty.call(req.body, "email")) updateFields.email = normalizeText(req.body.email).toLowerCase();
-    if (Object.prototype.hasOwnProperty.call(req.body, "address")) updateFields.address = normalizeText(req.body.address);
+    if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
+      updateFields.email = normalizeText(req.body.email).toLowerCase();
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, "address")) {
+      updateFields.address = normalizeText(req.body.address);
+    }
     if (Object.prototype.hasOwnProperty.call(req.body, "active")) updateFields.active = Boolean(req.body.active);
 
     const found = await findOrganizationById(req.params.id, requestedType);
     if (!found) return res.status(404).json({ message: "Organization not found." });
 
-    Object.assign(found.doc, updateFields);
-    const organization = await found.doc.save();
+    const organization =
+      found.type === "police_station"
+        ? await prisma.policeStation.update({ where: { id: found.doc.id }, data: updateFields })
+        : await prisma.ngoOrg.update({ where: { id: found.doc.id }, data: updateFields });
 
     await logAudit({
       user: req.user,
       action: "organization_updated",
       resourceType: found.type,
-      resourceId: organization._id,
+      resourceId: organization.id,
       resourceLabel: organization.name,
       details: `Updated ${found.type === "police_station" ? "police station" : "NGO"} ${organization.name}`,
     });
 
-    res.json(normalizeOrganization(organization.toObject(), found.type));
+    res.json(normalizeOrganization(organization, found.type));
   } catch (err) {
-    if (err?.code === 11000) {
+    if (err?.code === "P2002") {
       return res.status(409).json({ message: "An organization with this code already exists for this type." });
     }
     next(err);
@@ -359,7 +410,12 @@ exports.deleteOrganization = async (req, res, next) => {
     if (!found) return res.status(404).json({ message: "Organization not found." });
 
     const organizationName = found.doc.name;
-    await found.doc.deleteOne();
+
+    if (found.type === "police_station") {
+      await prisma.policeStation.delete({ where: { id: found.doc.id } });
+    } else {
+      await prisma.ngoOrg.delete({ where: { id: found.doc.id } });
+    }
 
     await logAudit({
       user: req.user,

@@ -1,6 +1,6 @@
 
-const User = require("../models/users");
-const EmergencyContact = require("../models/emergencyContacts");
+const prisma = require("../config/prisma");
+const { serializeUser, userIdOf } = require("../lib/serialize");
 const { syncRoleProfile } = require("../services/roleProfileService");
 const { logAudit } = require("../services/auditService");
 
@@ -36,8 +36,11 @@ const isValidSouthAfricanPhone = (value = "") => /^0[678]\d{8}$/.test(normalizeS
 
 exports.getProfile = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user.id).populate("emergencyContacts");
-    res.json(user);
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { emergencyContacts: true },
+    });
+    res.json(serializeUser(user));
   } catch (err) {
     next(err);
   }
@@ -51,17 +54,24 @@ exports.getChatbotContext = async (req, res, next) => {
       });
     }
 
-    const Report = require("../models/report");
-    const Case = require("../models/case");
-    const userId = req.user._id || req.user.id;
-    const user = await User.findById(userId).select("fullName email role policeStationName preferredNgoName");
+    const userId = userIdOf(req.user);
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        fullName: true,
+        email: true,
+        role: true,
+        policeStationName: true,
+        preferredNgoName: true,
+      },
+    });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
     const [reportCount, caseCount] = await Promise.all([
-      Report.countDocuments({ userId: user._id }),
-      Case.countDocuments({ userId: user._id }),
+      prisma.report.count({ where: { userId } }),
+      prisma.case.count({ where: { userId } }),
     ]);
 
     res.json({
@@ -91,7 +101,7 @@ exports.askChatbot = async (req, res, next) => {
 
     const { askChatbot, getChatbotGreeting } = require("../services/chatbotService");
     const question = req.body?.question || req.body?.message || "";
-    const userId = req.user._id || req.user.id;
+    const userId = userIdOf(req.user);
 
     if (!String(question).trim()) {
       const greeting = await getChatbotGreeting(userId);
@@ -213,67 +223,63 @@ exports.updateProfile = async (req, res, next) => {
       emergencyContact.phone = normalizedEmergencyPhone;
     }
 
-    let user = await User.findByIdAndUpdate(req.user.id, updateFields, { new: true, runValidators: true });
+    let user = await prisma.user.update({
+      where: { id: req.user.id },
+      data: updateFields,
+    }).catch(() => null);
+
     if (!user) {
       return res.status(404).json({ message: "User not found." });
     }
 
-    // Handle emergency contact: update if _id exists, otherwise create new
     if (emergencyContact) {
-      if (emergencyContact._id) {
-        // Update existing emergency contact
-        const contactDoc = await EmergencyContact.findOneAndUpdate(
-          { _id: emergencyContact._id },
-          {
-            name: emergencyContact.fullName, // legacy
+      const contactId = emergencyContact._id || emergencyContact.id;
+
+      if (contactId) {
+        const contactDoc = await prisma.emergencyContact.updateMany({
+          where: { id: contactId, userId: user.id },
+          data: {
+            name: emergencyContact.fullName,
             fullName: emergencyContact.fullName,
             phone: emergencyContact.phone,
             relationship: emergencyContact.relationship,
             email: emergencyContact.email,
-            userId: user._id
           },
-          { returnDocument: "after", runValidators: true }
-        );
+        });
 
-        if (!contactDoc) {
+        if (contactDoc.count === 0) {
           return res.status(404).json({ message: "Emergency contact not found." });
         }
-
-        if (!user.emergencyContacts.map(id => id.toString()).includes(contactDoc._id.toString())) {
-          user.emergencyContacts.push(contactDoc._id);
-          await user.save();
-        }
       } else {
-        // Create new emergency contact
-        const contactDoc = await EmergencyContact.create({
-          name: emergencyContact.fullName, // legacy
-          fullName: emergencyContact.fullName,
-          phone: emergencyContact.phone,
-          relationship: emergencyContact.relationship,
-          email: emergencyContact.email,
-          userId: user._id
+        await prisma.emergencyContact.create({
+          data: {
+            name: emergencyContact.fullName,
+            fullName: emergencyContact.fullName,
+            phone: emergencyContact.phone,
+            relationship: emergencyContact.relationship,
+            email: emergencyContact.email,
+            userId: user.id,
+          },
         });
-        // Only add if not already present (avoid duplicates)
-        if (!user.emergencyContacts.map(id => id.toString()).includes(contactDoc._id.toString())) {
-          user.emergencyContacts.push(contactDoc._id);
-          await user.save();
-        }
       }
     }
 
-    // Return updated user with populated emergencyContacts
-    user = await User.findById(user._id).populate("emergencyContacts");
+    user = await prisma.user.findUnique({
+      where: { id: user.id },
+      include: { emergencyContacts: true },
+    });
+
     await syncRoleProfile(user);
     await logAudit({
       user: req.user,
       action: "profile_updated",
       resourceType: "user",
-      resourceId: user._id,
+      resourceId: user.id,
       resourceLabel: user.email,
       details: "Updated profile information",
-      metadata: { updatedFields: Object.keys(updateFields), emergencyContactUpdated: Boolean(emergencyContact) }
+      metadata: { updatedFields: Object.keys(updateFields), emergencyContactUpdated: Boolean(emergencyContact) },
     });
-    res.json(user);
+    res.json(serializeUser(user));
   } catch (err) {
     next(err);
   }
@@ -285,32 +291,36 @@ exports.requestAccountDeletion = async (req, res, next) => {
       return res.status(403).json({ message: "Admin accounts cannot request deletion from this page." });
     }
 
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      {
+    let user = await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
         accountDeletionStatus: "scheduled",
-        accountDeletionRequestedAt: new Date()
+        accountDeletionRequestedAt: new Date(),
       },
-      { new: true, runValidators: true }
-    ).populate("emergencyContacts");
+    }).catch(() => null);
 
     if (!user) {
       return res.status(404).json({ message: "User not found." });
     }
+
+    user = await prisma.user.findUnique({
+      where: { id: user.id },
+      include: { emergencyContacts: true },
+    });
 
     await syncRoleProfile(user);
     await logAudit({
       user: req.user,
       action: "account_deletion_requested",
       resourceType: "user",
-      resourceId: user._id,
+      resourceId: user.id,
       resourceLabel: user.email,
-      details: "Account scheduled for permanent deletion"
+      details: "Account scheduled for permanent deletion",
     });
 
     res.json({
       message: "Account scheduled for permanent deletion.",
-      user
+      user: serializeUser(user),
     });
   } catch (err) {
     next(err);

@@ -1,9 +1,5 @@
-const mongoose = require("mongoose");
-const User = require("../models/users");
-const Report = require("../models/report");
-const Case = require("../models/case");
-const Alert = require("../models/alert");
-const EmergencyContact = require("../models/emergencyContacts");
+const prisma = require("../config/prisma");
+const { userIdOf } = require("../lib/serialize");
 
 const OFF_TOPIC_REPLY =
   "I'm the SafeGuard Assistant. I can only help with SafeGuard features, reporting incidents, SOS alerts, case tracking, and support services.";
@@ -79,13 +75,11 @@ const OFF_TOPIC_HINTS = [
 
 const MATH_PATTERN = /\b\d+\s*[x×*+\-÷/]\s*\d+\b|\bwhat is\s+\d|\bsolve\b|\bequation\b/i;
 
-const toObjectId = (userId) => {
+const normalizeUserId = (userId) => {
   if (!userId) return null;
-  if (userId instanceof mongoose.Types.ObjectId) return userId;
-  if (typeof userId === "object" && userId._id) return toObjectId(userId._id);
-  const asString = String(userId);
-  if (!mongoose.Types.ObjectId.isValid(asString)) return null;
-  return new mongoose.Types.ObjectId(asString);
+  if (typeof userId === "object") return userIdOf(userId);
+  const asString = String(userId).trim();
+  return asString || null;
 };
 
 const formatDate = (value) => {
@@ -104,7 +98,6 @@ const isSafeGuardQuestion = (question) => {
   if (MATH_PATTERN.test(q)) return false;
   if (OFF_TOPIC_HINTS.some((hint) => q.includes(hint))) return false;
 
-  // Personal SafeGuard account questions
   if (
     /\b(my|mine|i have|do i|am i|who am i)\b/.test(q) &&
     /\b(report|case|sos|alert|status|contact|account|name|profile|referral|ngo)\b/.test(q)
@@ -118,45 +111,91 @@ const isSafeGuardQuestion = (question) => {
 };
 
 const loadReporterData = async (userIdInput) => {
-  const userId = toObjectId(userIdInput);
+  const userId = normalizeUserId(userIdInput);
   if (!userId) return null;
 
-  const user = await User.findById(userId)
-    .select("fullName email role phone policeStationId policeStationName preferredNgoId preferredNgoName ngoId ngoName")
-    .lean();
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      fullName: true,
+      email: true,
+      role: true,
+      phone: true,
+      policeStationId: true,
+      policeStationName: true,
+      preferredNgoId: true,
+      preferredNgoName: true,
+      ngoId: true,
+      ngoName: true,
+    },
+  });
 
   if (!user) return null;
 
-  // Hard isolation: every query is scoped to this userId only.
   const ownerFilter = { userId };
 
   const [reports, cases, alerts, contacts, reportCount, caseCount, alertCount, contactCount, statusGroups] =
     await Promise.all([
-      Report.find(ownerFilter)
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .select("caseId incidentType status location createdAt")
-        .lean(),
-      Case.find(ownerFilter)
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .select("caseId type status priority location createdAt sosTriggeredAt")
-        .lean(),
-      Alert.find(ownerFilter)
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .select("type status createdAt location")
-        .lean(),
-      EmergencyContact.find(ownerFilter).select("fullName name phone email relationship").lean(),
-      Report.countDocuments(ownerFilter),
-      Case.countDocuments(ownerFilter),
-      Alert.countDocuments(ownerFilter),
-      EmergencyContact.countDocuments(ownerFilter),
-      Report.aggregate([{ $match: { userId } }, { $group: { _id: "$status", count: { $sum: 1 } } }]),
+      prisma.report.findMany({
+        where: ownerFilter,
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: {
+          caseId: true,
+          incidentType: true,
+          status: true,
+          location: true,
+          createdAt: true,
+        },
+      }),
+      prisma.case.findMany({
+        where: ownerFilter,
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: {
+          caseId: true,
+          type: true,
+          status: true,
+          priority: true,
+          location: true,
+          createdAt: true,
+          sosTriggeredAt: true,
+        },
+      }),
+      prisma.alert.findMany({
+        where: ownerFilter,
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: {
+          type: true,
+          status: true,
+          createdAt: true,
+          location: true,
+        },
+      }),
+      prisma.emergencyContact.findMany({
+        where: ownerFilter,
+        select: {
+          fullName: true,
+          name: true,
+          phone: true,
+          email: true,
+          relationship: true,
+        },
+      }),
+      prisma.report.count({ where: ownerFilter }),
+      prisma.case.count({ where: ownerFilter }),
+      prisma.alert.count({ where: ownerFilter }),
+      prisma.emergencyContact.count({ where: ownerFilter }),
+      prisma.report.groupBy({
+        by: ["status"],
+        where: ownerFilter,
+        _count: { status: true },
+      }),
     ]);
 
   const statusCounts = statusGroups.reduce((acc, row) => {
-    acc[row._id || "unknown"] = row.count;
+    acc[row.status || "unknown"] = row._count.status;
     return acc;
   }, {});
 
@@ -410,7 +449,6 @@ exports.askChatbot = async (userId, questionInput) => {
     };
   }
 
-  // SafeGuard-looking question that we still couldn't map — stay in scope, do not invent general knowledge.
   return {
     answer:
       `${OFF_TOPIC_REPLY}\n\nTry asking: "How many reports have I submitted?", "What is my latest case?", "What is the status of my report?", "Have I been referred to an NGO?", or "How do I trigger an SOS?".`,
@@ -432,10 +470,9 @@ exports.getChatbotGreeting = async (userId) => {
   );
 };
 
-// Exported for tests / isolation checks
 exports._internal = {
   isSafeGuardQuestion,
   loadReporterData,
-  toObjectId,
+  normalizeUserId,
   OFF_TOPIC_REPLY,
 };

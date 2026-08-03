@@ -1,23 +1,25 @@
-const Evidence = require("../models/evidence");
+const prisma = require("../config/prisma");
+const { serializeEvidence } = require("../lib/serialize");
 const { logAudit } = require("../services/auditService");
 
 exports.uploadEvidence = async (req, res) => {
   const { reportId } = req.body;
-
   const fileUrl = req.file.path;
 
-  const evidence = await Evidence.create({
-    reportId,
-    fileUrl,
-    type: req.file.mimetype
+  const evidence = await prisma.evidence.create({
+    data: {
+      reportId,
+      fileUrl,
+      type: req.file.mimetype,
+    },
   });
 
-  res.json(evidence);
+  res.json(serializeEvidence(evidence));
 };
 
 exports.logEvidenceView = async (req, res) => {
   try {
-    const evidence = await Evidence.findById(req.params.id);
+    const evidence = await prisma.evidence.findUnique({ where: { id: req.params.id } });
     await logAudit({
       user: req.user,
       action: "evidence_viewed",
@@ -27,8 +29,8 @@ exports.logEvidenceView = async (req, res) => {
       details: `Viewed evidence ${evidence?.name || req.params.id}`,
       metadata: {
         evidenceType: evidence?.type || "",
-        reportId: evidence?.reportId || null
-      }
+        reportId: evidence?.reportId || null,
+      },
     });
 
     res.json({ success: true });
