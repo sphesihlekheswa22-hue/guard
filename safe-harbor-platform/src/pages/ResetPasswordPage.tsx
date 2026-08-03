@@ -27,10 +27,7 @@ const ResetPasswordPage = () => {
 
   const token = params.token || searchParams.get("token");
   const pageBackground = {
-    backgroundImage: `url(/gbv-bg.png)`,
-    backgroundSize: "cover",
-    backgroundRepeat: "no-repeat",
-    backgroundPosition: "center",
+    backgroundColor: "#ffffff",
   };
 
   useEffect(() => {
@@ -205,7 +202,7 @@ const ResetPasswordPage = () => {
   if (isLoading) {
     return (
       <div className="min-h-svh flex items-center justify-center p-4" style={pageBackground}>
-        <div className="text-center bg-card/80 rounded-2xl border border-border p-8 shadow-lg">
+        <div className="text-center bg-white rounded-2xl border border-border p-8 shadow-sm">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
           <p className="mt-2 text-muted-foreground">Verifying reset link...</p>
         </div>
@@ -219,7 +216,7 @@ const ResetPasswordPage = () => {
 
   return (
     <div className="min-h-svh flex items-center justify-center p-4" style={pageBackground}>
-      <Card className="w-full max-w-md bg-card/85 shadow-2xl">
+      <Card className="w-full max-w-md bg-white shadow-sm border border-border">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold">Reset Your Password</CardTitle>
           <CardDescription>

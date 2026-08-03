@@ -472,17 +472,8 @@ const AuthPage = () => {
   };
 
   return (
-    <div
-      className="relative flex min-h-svh items-center justify-center overflow-hidden px-4 py-6"
-      style={{
-        backgroundImage: `linear-gradient(180deg, rgba(8, 28, 42, 0.5), rgba(8, 28, 42, 0.68)), url(/gbv-bg.png)`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-      }}
-    >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(199_89%_48%/0.18),transparent_45%)]" />
-
-      <div className="relative z-10 w-full max-w-md animate-fade-up space-y-5 rounded-[1.75rem] border border-white/50 bg-white/92 p-5 shadow-elevated backdrop-blur-xl sm:space-y-6 sm:p-8">
+    <div className="relative flex min-h-svh items-center justify-center overflow-hidden bg-white px-4 py-6">
+      <div className="relative z-10 w-full max-w-md animate-fade-up space-y-5 rounded-2xl border border-border bg-white p-5 shadow-sm sm:space-y-6 sm:p-8">
         <Link
           to="/"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
