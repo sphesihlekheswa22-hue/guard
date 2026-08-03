@@ -34,7 +34,6 @@ services:
     name: safeguard-web
     runtime: static
     rootDir: safe-harbor-platform
-    plan: free
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     routes:
