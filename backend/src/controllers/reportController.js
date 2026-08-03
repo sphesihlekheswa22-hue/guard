@@ -256,6 +256,8 @@ exports.createReport = async (req, res, next) => {
         console.warn("⚠️  Socket.IO instance not available on app.locals");
       } else {
         const evidenceArray = (result.evidenceIds || []).map((ev) => ({
+          id: ev.id || ev._id,
+          _id: ev._id || ev.id,
           fileUrl: ev.fileUrl,
           type: ev.type,
           name: ev.name,
