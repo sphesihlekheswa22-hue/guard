@@ -1,7 +1,7 @@
 # SafeGuard — Render Blueprint
-# Docs: https://render.com/docs/blueprint-spec
+# https://render.com/docs/blueprint-spec
 #
-# Secrets (MONGO_URI, JWT_SECRET, EmailJS, etc.) are prompted on first Blueprint create (sync: false).
+# On first create, Render should only ask for MONGO_URI (Atlas).
 # Do NOT set USE_LOCAL_MONGO=true on Render.
 
 services:
@@ -28,7 +28,10 @@ services:
       - key: MONGO_URI
         sync: false
       - key: FRONTEND_URL
-        sync: false
+        fromService:
+          name: safeguard-web
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
 
   - type: web
     name: safeguard-web
@@ -42,14 +45,20 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        sync: false
+        fromService:
+          name: safeguard-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: VITE_SOCKET_URL
-        sync: false
+        fromService:
+          name: safeguard-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: VITE_EMAILJS_SERVICE_ID
-        sync: false
+        value: service_91c0yld
       - key: VITE_EMAILJS_SOS_TEMPLATE_ID
-        sync: false
+        value: template_g1b2tqi
       - key: VITE_EMAILJS_RESET_TEMPLATE_ID
-        sync: false
+        value: template_cm8epcs
       - key: VITE_EMAILJS_PUBLIC_KEY
-        sync: false
+        value: 14kT7W4o1zCLRWbPA
