@@ -1,0 +1,57 @@
+# SafeGuard — Render Blueprint
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Secrets (MONGO_URI, JWT_SECRET, EmailJS, etc.) are prompted on first Blueprint create (sync: false).
+# Do NOT set USE_LOCAL_MONGO=true on Render.
+
+services:
+  - type: web
+    name: safeguard-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: USE_LOCAL_MONGO
+        value: "false"
+      - key: SEED_IF_EMPTY
+        value: "true"
+      - key: ADMIN_EMAILS
+        value: admin@safeguard.com
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MONGO_URI
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+
+  - type: web
+    name: safeguard-web
+    runtime: static
+    rootDir: safe-harbor-platform
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_SOCKET_URL
+        sync: false
+      - key: VITE_EMAILJS_SERVICE_ID
+        sync: false
+      - key: VITE_EMAILJS_SOS_TEMPLATE_ID
+        sync: false
+      - key: VITE_EMAILJS_RESET_TEMPLATE_ID
+        sync: false
+      - key: VITE_EMAILJS_PUBLIC_KEY
+        sync: false

@@ -1,0 +1,15 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.env
+**/.env
+backend/src/.env
+backend/uploads/
+backend/data/
+*.log
+.DS_Store
+coverage/
+.vite/
+.vscode/
+.idea/
