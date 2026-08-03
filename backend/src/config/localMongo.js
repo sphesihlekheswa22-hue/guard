@@ -1,12 +1,13 @@
-const { MongoMemoryServer } = require("mongodb-memory-server");
-
 let mongod;
 
 /**
  * Starts an embedded in-memory MongoDB on this machine (no Atlas / no Docker).
- * Data resets when the backend process stops — good for local testing.
+ * Data resets when the backend process stops — good for local testing only.
+ * Required package is a devDependency and must not load on Render.
  */
 async function startLocalMongo() {
+  const { MongoMemoryServer } = require("mongodb-memory-server");
+
   mongod = await MongoMemoryServer.create({
     instance: {
       dbName: "gbvDatabase",
