@@ -31,9 +31,14 @@ const start = async () => {
   app.use(express.json());
   app.locals.io = io;
 
+  const uploadsDir = path.join(__dirname, "uploads");
+  if (!require("fs").existsSync(uploadsDir)) {
+    require("fs").mkdirSync(uploadsDir, { recursive: true });
+  }
+
   app.use(
     "/uploads",
-    express.static(path.join(__dirname, "uploads"), {
+    express.static(uploadsDir, {
       setHeaders: (res, filePath) => {
         if (filePath.endsWith(".webm")) {
           res.setHeader("Content-Type", "audio/webm");
