@@ -433,7 +433,7 @@ const buildAuthorityCasesPdf = (reports: any[], user: any, alertStats: { active:
       ["Reporter Email", reporter.email || "Not provided"],
       ["Reporter Phone", reporter.phone || "Not provided"],
       ["Police Station", reporter.policeStationName || report.policeStationId || user?.policeStationName || "Not provided"],
-      ["Preferred NGO", reporter.preferredNgoName || report.preferredNgoId || "Not provided"],
+      ["Assigned NGO", reporter.referredNgoName || report.referredNgoName || report.referredNgoId || "Not assigned by police yet"],
       ["Handled By", getHandledBy(report)],
       ["Evidence Files", report.evidenceIds?.length || 0],
     ]);
@@ -1518,6 +1518,8 @@ const UpdateStatus = () => {
   const [selectedCase, setSelectedCase] = useState<any | null>(null);
   const [caseDetails, setCaseDetails] = useState<any | null>(null);
   const [newStatus, setNewStatus] = useState<string>("");
+  const [selectedNgoId, setSelectedNgoId] = useState<string>("");
+  const [ngoOptions, setNgoOptions] = useState<{ id: string; label: string }[]>([]);
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -1546,6 +1548,24 @@ const UpdateStatus = () => {
 
   useEffect(() => {
     fetchReports();
+  }, []);
+
+  useEffect(() => {
+    const loadNgos = async () => {
+      try {
+        const res = await fetch("/api/organizations/public?type=ngo");
+        if (!res.ok) return;
+        const data = await res.json();
+        setNgoOptions(
+          Array.isArray(data)
+            ? data.map((item: any) => ({ id: item._id || item.id || item.code, label: item.name }))
+            : []
+        );
+      } catch {
+        setNgoOptions([]);
+      }
+    };
+    loadNgos();
   }, []);
 
   // Setup WebSocket connection for real-time report updates
@@ -1637,34 +1657,61 @@ const UpdateStatus = () => {
     setSelectedCase(report);
     setCaseDetails(report);
     setNewStatus("");
+    setSelectedNgoId("");
   };
 
   const handleUpdateStatus = async () => {
     if (!selectedCase || !newStatus) return;
 
+    if (newStatus === "referred_to_ngo" && !selectedNgoId) {
+      toast({
+        title: "NGO required",
+        description: "Select which NGO should receive this referral.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const token = localStorage.getItem("token");
+      const selectedNgo = ngoOptions.find((ngo) => ngo.id === selectedNgoId);
+      const payload: Record<string, string> = { status: newStatus };
+      if (newStatus === "referred_to_ngo") {
+        payload.referredNgoId = selectedNgoId;
+        payload.referredNgoName = selectedNgo?.label || "";
+      }
+
       const res = await fetch(`/api/reports/${selectedCase._id}`, {
         method: "PATCH",
         headers: {
           Authorization: token ? `Bearer ${token}` : "",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Failed to update status");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.msg || "Failed to update status");
 
       toast({
         title: "✅ Case Status Updated",
-        description: `Case ${selectedCase.caseId} status changed to ${newStatus}`,
+        description:
+          newStatus === "referred_to_ngo"
+            ? `Case ${selectedCase.caseId} referred to ${selectedNgo?.label || "NGO"}`
+            : `Case ${selectedCase.caseId} status changed to ${newStatus}`,
       });
 
       // Update reports list
       setReports(prevReports => 
         prevReports.map(r => 
           r._id === selectedCase._id 
-            ? { ...r, status: newStatus, updatedAt: new Date().toISOString() }
+            ? {
+                ...r,
+                status: newStatus,
+                referredNgoId: payload.referredNgoId || r.referredNgoId,
+                referredNgoName: payload.referredNgoName || r.referredNgoName,
+                updatedAt: new Date().toISOString(),
+              }
             : r
         )
       );
@@ -1684,6 +1731,7 @@ const UpdateStatus = () => {
       setSelectedCase(null);
       setCaseDetails(null);
       setNewStatus("");
+      setSelectedNgoId("");
     } catch (err: any) {
       toast({
         title: "Failed to update status",
@@ -1785,6 +1833,7 @@ const UpdateStatus = () => {
               setSelectedCase(null);
               setCaseDetails(null);
               setNewStatus("");
+              setSelectedNgoId("");
             }}
             className="absolute top-4 right-4 p-1 hover:bg-muted rounded"
           >
@@ -1817,7 +1866,10 @@ const UpdateStatus = () => {
                 <Button 
                   variant={newStatus === "investigating" ? "default" : "outline"} 
                   size="sm"
-                  onClick={() => setNewStatus("investigating")}
+                  onClick={() => {
+                    setNewStatus("investigating");
+                    setSelectedNgoId("");
+                  }}
                 >
                   Investigating
                 </Button>
@@ -1831,16 +1883,43 @@ const UpdateStatus = () => {
                 <Button 
                   variant={newStatus === "resolved" ? "default" : "outline"} 
                   size="sm"
-                  onClick={() => setNewStatus("resolved")}
+                  onClick={() => {
+                    setNewStatus("resolved");
+                    setSelectedNgoId("");
+                  }}
                 >
                   Resolved
                 </Button>
               </div>
             </div>
 
+            {newStatus === "referred_to_ngo" && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">Assign NGO</p>
+                <select
+                  value={selectedNgoId}
+                  onChange={(e) => setSelectedNgoId(e.target.value)}
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                  required
+                >
+                  <option value="">
+                    {ngoOptions.length === 0 ? "No NGOs available" : "Select NGO for this referral"}
+                  </option>
+                  {ngoOptions.map((ngo) => (
+                    <option key={ngo.id} value={ngo.id}>
+                      {ngo.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Only police can assign an NGO. The reporter cannot choose one.
+                </p>
+              </div>
+            )}
+
             <Button 
               onClick={handleUpdateStatus}
-              disabled={!newStatus}
+              disabled={!newStatus || (newStatus === "referred_to_ngo" && !selectedNgoId)}
               className="w-full"
             >
               Save Status Update

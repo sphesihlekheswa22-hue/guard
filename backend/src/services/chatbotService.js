@@ -276,7 +276,7 @@ const buildHowToAnswer = (question) => {
     return "In Settings you can update your profile and emergency contacts (name, relationship, email, phone). Contacts are used for SOS notifications.";
   }
   if (q.includes("ngo") || q.includes("referral") || q.includes("referred") || q.includes("police")) {
-    return "Reporters choose a preferred NGO at signup. Police at SAPS Soshanguve can update cases and refer them to NGOs. You can see referral status in Track Case.";
+    return "Police at SAPS Soshanguve assign an NGO when they refer your case. You cannot choose an NGO yourself. Check Track Case for referral status.";
   }
 
   return null;
@@ -313,7 +313,7 @@ exports.askChatbot = async (userId, questionInput) => {
       answer:
         `You are ${user.fullName || "a SafeGuard user"} (${user.email}). ` +
         `Role: ${user.role}. Police station: ${user.policeStationName || "SAPS Soshanguve Police Station"}. ` +
-        `Preferred NGO: ${user.preferredNgoName || "not set"}. ` +
+        `NGO is assigned by police when a case is referred. ` +
         `Database totals — reports: ${totals.reports}, emergency cases: ${totals.cases}, alerts: ${totals.alerts}, emergency contacts: ${totals.contacts}.`,
       usedDatabase: true,
       context: totals,
@@ -333,7 +333,7 @@ exports.askChatbot = async (userId, questionInput) => {
             (referredReports.length
               ? `\nLatest referred cases:\n${summarizeReports(referredReports)}`
               : "")
-          : `No — none of your ${totals.reports} report(s) currently have status "referred_to_ngo". Your preferred NGO is ${user.preferredNgoName || "not set"}.`,
+          : `No — none of your ${totals.reports} report(s) currently have status "referred_to_ngo". Police assign the NGO when they refer a case.`,
       usedDatabase: true,
       context: { referredToNgo: totals.referredToNgo, reports: totals.reports },
     };
@@ -434,7 +434,7 @@ exports.askChatbot = async (userId, questionInput) => {
     return {
       answer:
         `From your account record: police station = ${user.policeStationName || "SAPS Soshanguve Police Station"}; ` +
-        `preferred NGO = ${user.preferredNgoName || "not set"}. SafeGuard only uses Soshanguve SAPS.`,
+        `NGO referrals are assigned by police only. SafeGuard only uses Soshanguve SAPS.`,
       usedDatabase: true,
     };
   }

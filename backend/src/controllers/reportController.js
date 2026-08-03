@@ -26,17 +26,7 @@ const buildNgoReferralWhere = (ngoId) => ({
         },
       ],
     },
-    {
-      OR: [
-        { referredNgoId: ngoId },
-        {
-          AND: [
-            { preferredNgoId: ngoId },
-            { OR: [{ referredNgoId: null }, { referredNgoId: "" }] },
-          ],
-        },
-      ],
-    },
+    { referredNgoId: ngoId },
   ],
 });
 
@@ -433,14 +423,32 @@ exports.updateReport = async (req, res, next) => {
     };
 
     if (status === "referred_to_ngo") {
-      if (!report.preferredNgoId) {
+      const referredNgoId = String(req.body.referredNgoId || req.body.ngoId || "").trim();
+      let referredNgoName = String(req.body.referredNgoName || req.body.ngoName || "").trim();
+
+      if (!referredNgoId) {
         return res.status(400).json({
-          message: "This report does not have a reporter-selected NGO to refer to.",
+          message: "Select an NGO to refer this case to.",
         });
       }
 
-      updateData.referredNgoId = report.preferredNgoId;
-      updateData.referredNgoName = report.referredNgoName || "";
+      if (!["authority", "officer", "admin"].includes(req.user.role)) {
+        return res.status(403).json({
+          message: "Only police officers can assign an NGO referral.",
+        });
+      }
+
+      if (!referredNgoName) {
+        const ngo = await prisma.ngoOrg.findFirst({
+          where: {
+            OR: [{ id: referredNgoId }, { code: referredNgoId }],
+          },
+        });
+        referredNgoName = ngo?.name || "";
+      }
+
+      updateData.referredNgoId = referredNgoId;
+      updateData.referredNgoName = referredNgoName;
     }
 
     const updated = await prisma.report.update({

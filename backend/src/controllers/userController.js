@@ -164,7 +164,6 @@ exports.updateProfile = async (req, res, next) => {
     }
 
     const canUpdatePoliceStation = ["reporter", "authority", "officer"].includes(req.user.role);
-    const canUpdatePreferredNgo = req.user.role === "reporter";
     const canUpdateAssignedNgo = ["ngo", "ngo_worker"].includes(req.user.role);
 
     if (Object.prototype.hasOwnProperty.call(userFields, "policeStationId") || Object.prototype.hasOwnProperty.call(userFields, "policeStationName")) {
@@ -182,17 +181,9 @@ exports.updateProfile = async (req, res, next) => {
     }
 
     if (Object.prototype.hasOwnProperty.call(userFields, "preferredNgoId") || Object.prototype.hasOwnProperty.call(userFields, "preferredNgoName")) {
-      if (!canUpdatePreferredNgo) {
-        return res.status(403).json({ message: "Only reporter accounts can update a preferred NGO." });
-      }
-
-      const preferredNgoId = normalizeAssignmentId(userFields.preferredNgoId);
-      if (!preferredNgoId) {
-        return res.status(400).json({ message: "Preferred NGO is required." });
-      }
-
-      updateFields.preferredNgoId = preferredNgoId;
-      updateFields.preferredNgoName = normalizeOptionalText(userFields.preferredNgoName);
+      return res.status(403).json({
+        message: "Reporters cannot choose an NGO. Police assign an NGO when referring a case.",
+      });
     }
 
     if (Object.prototype.hasOwnProperty.call(userFields, "ngoId") || Object.prototype.hasOwnProperty.call(userFields, "ngoName")) {

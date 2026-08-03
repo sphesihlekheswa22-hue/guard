@@ -174,10 +174,11 @@ exports.register = async (req, res) => {
         role,
         policeStationId: policeStationId || null,
         policeStationName: stationNameForUser,
-        ngoId: ngoId || null,
-        ngoName: ngoName || null,
-        preferredNgoId: preferredNgoId || null,
-        preferredNgoName: preferredNgoName || null,
+        ngoId: role === "ngo" || role === "ngo_worker" ? ngoId || null : null,
+        ngoName: role === "ngo" || role === "ngo_worker" ? ngoName || null : null,
+        // Reporters do not choose an NGO — police assign on referral
+        preferredNgoId: null,
+        preferredNgoName: null,
       },
     });
 

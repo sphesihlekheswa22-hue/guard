@@ -242,15 +242,6 @@ const AuthPage = () => {
           });
           return;
         }
-
-        if (!selectedNgo) {
-          toast({
-            title: "Preferred NGO required",
-            description: ngoOptions.length === 0 ? "No NGOs are available from the database yet." : "Please select your preferred NGO.",
-            variant: "destructive",
-          });
-          return;
-        }
       }
     }
 
@@ -328,8 +319,6 @@ const AuthPage = () => {
         if (signupRole === "reporter") {
           signupPayload.policeStationId = selectedPoliceStation;
           signupPayload.policeStationName = SOSHANGUVE_STATION_NAME;
-          signupPayload.preferredNgoId = selectedNgo;
-          signupPayload.preferredNgoName = ngoOptions.find((item) => item.id === selectedNgo)?.label || "";
         }
 
         response = await fetch(`${AUTH_API_URL}/register`, {
@@ -560,41 +549,25 @@ const AuthPage = () => {
           )}
 
           {!isLogin && role === "reporter" && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="policeStation">Police Station</Label>
-                <select
-                  id="policeStation"
-                  value={selectedPoliceStation}
-                  onChange={(e) => setSelectedPoliceStation(e.target.value)}
-                  className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                  disabled={organizationsLoading || policeStations.length === 0}
-                  required
-                >
-                  <option value="">{organizationsLoading ? "Loading police stations..." : policeStations.length === 0 ? "No police stations available" : "Select your police station"}</option>
-                  {policeStations.map((station) => (
-                    <option key={station.id} value={station.id}>{station.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="preferredNgo">Preferred NGO</Label>
-                <select
-                  id="preferredNgo"
-                  value={selectedNgo}
-                  onChange={(e) => setSelectedNgo(e.target.value)}
-                  className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                  disabled={organizationsLoading || ngoOptions.length === 0}
-                  required
-                >
-                  <option value="">{organizationsLoading ? "Loading NGOs..." : ngoOptions.length === 0 ? "No NGOs available" : "Select your preferred NGO"}</option>
-                  {ngoOptions.map((ngo) => (
-                    <option key={ngo.id} value={ngo.id}>{ngo.label}</option>
-                  ))}
-                </select>
-              </div>
-            </>
+            <div className="space-y-2">
+              <Label htmlFor="policeStation">Police Station</Label>
+              <select
+                id="policeStation"
+                value={selectedPoliceStation}
+                onChange={(e) => setSelectedPoliceStation(e.target.value)}
+                className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                disabled={organizationsLoading || policeStations.length === 0}
+                required
+              >
+                <option value="">{organizationsLoading ? "Loading police stations..." : policeStations.length === 0 ? "No police stations available" : "Select your police station"}</option>
+                {policeStations.map((station) => (
+                  <option key={station.id} value={station.id}>{station.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Police officers assign an NGO to your case when needed. You do not choose an NGO.
+              </p>
+            </div>
           )}
 
           <div className="space-y-2">

@@ -128,7 +128,7 @@ exports.createReportService = async (user, data, files) => {
         userId,
         clientRequestId: clientRequestId || null,
         policeStationId: user.policeStationId || data.policeStationId || null,
-        preferredNgoId: user.preferredNgoId || data.preferredNgoId || null,
+        preferredNgoId: null,
         description: data.description || null,
         incidentType: data.incidentType || null,
         location: {

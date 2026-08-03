@@ -485,7 +485,7 @@ const Settings = () => {
   if (profile?.role === "reporter") {
     roleInfo.push(
       ["Police Station", profile.policeStationName || profile.policeStationId || "Not assigned"],
-      ["Preferred NGO", profile.preferredNgoName || profile.preferredNgoId || "Not assigned"],
+      ["NGO", "Assigned by police when your case is referred"],
     );
   }
 
@@ -498,7 +498,7 @@ const Settings = () => {
   }
 
   const canUpdatePoliceStation = profile?.role === "reporter" || profile?.role === "authority" || profile?.role === "officer";
-  const canUpdatePreferredNgo = profile?.role === "reporter";
+  const canUpdatePreferredNgo = false;
   const canUpdateAssignedNgo = profile?.role === "ngo" || profile?.role === "ngo_worker";
   const canRequestAccountDeletion = ["reporter", "authority", "officer", "ngo", "ngo_worker"].includes(profile?.role || "");
 
