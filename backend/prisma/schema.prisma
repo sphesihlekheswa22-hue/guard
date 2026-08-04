@@ -51,7 +51,7 @@ model User {
 
   @@index([role])
   @@index([policeStationId])
-  @@map("users")
+  @@map("user")
 }
 
 model ReporterProfile {
@@ -68,7 +68,7 @@ model ReporterProfile {
   updatedAt         DateTime @updatedAt
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("reporter_profiles")
+  @@map("reporter_profile")
 }
 
 model PoliceOfficerProfile {
@@ -83,7 +83,7 @@ model PoliceOfficerProfile {
   updatedAt         DateTime @updatedAt
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("police_officer_profiles")
+  @@map("police_officer_profile")
 }
 
 model NgoProfile {
@@ -98,7 +98,7 @@ model NgoProfile {
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("ngo_profiles")
+  @@map("ngo_profile")
 }
 
 model AdminProfile {
@@ -111,7 +111,7 @@ model AdminProfile {
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("admin_profiles")
+  @@map("admin_profile")
 }
 
 model PoliceStation {
@@ -125,7 +125,7 @@ model PoliceStation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("police_stations")
+  @@map("police_station")
 }
 
 model NgoOrg {
@@ -139,7 +139,7 @@ model NgoOrg {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("ngo_orgs")
+  @@map("ngo_org")
 }
 
 model EmergencyContact {
@@ -156,7 +156,7 @@ model EmergencyContact {
 
   @@index([userId])
   @@index([userId, email])
-  @@map("emergency_contacts")
+  @@map("emergency_contact")
 }
 
 model Report {
@@ -186,7 +186,7 @@ model Report {
   @@index([userId, createdAt])
   @@index([policeStationId, createdAt])
   @@index([status])
-  @@map("reports")
+  @@map("report")
 }
 
 model Evidence {
@@ -203,7 +203,7 @@ model Evidence {
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([reportId])
-  @@map("evidences")
+  @@map("evidence")
 }
 
 model AiAnalysis {
@@ -215,7 +215,7 @@ model AiAnalysis {
   updatedAt DateTime @updatedAt
   report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
-  @@map("ai_analyses")
+  @@map("ai_analysis")
 }
 
 model Case {
@@ -243,7 +243,7 @@ model Case {
   @@index([userId, createdAt])
   @@index([policeStationId, status, createdAt])
   @@index([reportId])
-  @@map("cases")
+  @@map("case")
 }
 
 model Alert {
@@ -267,7 +267,7 @@ model Alert {
   @@index([userId, createdAt])
   @@index([policeStationId, status, createdAt])
   @@index([caseId])
-  @@map("alerts")
+  @@map("alert")
 }
 
 model Notification {
@@ -280,7 +280,7 @@ model Notification {
   user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("notifications")
+  @@map("notification")
 }
 
 model AuthSession {
@@ -294,7 +294,7 @@ model AuthSession {
 
   @@index([userId])
   @@index([token])
-  @@map("auth_sessions")
+  @@map("auth_session")
 }
 
 model AuditLog {
@@ -314,7 +314,7 @@ model AuditLog {
   user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
-  @@map("audit_logs")
+  @@map("audit_log")
 }
 
 model LiveLocation {
@@ -326,7 +326,7 @@ model LiveLocation {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId])
-  @@map("live_locations")
+  @@map("live_location")
 }
 
 model TrackingSession {
@@ -340,5 +340,5 @@ model TrackingSession {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("tracking_sessions")
+  @@map("tracking_session")
 }

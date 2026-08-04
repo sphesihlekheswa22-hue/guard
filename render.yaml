@@ -10,7 +10,7 @@ services:
     rootDir: backend
     plan: free
     region: oregon
-    buildCommand: npm install && npx prisma generate && npx prisma db push
+    buildCommand: npm install && npx prisma generate && npx prisma db execute --file prisma/migrations/rename_tables_to_singular.sql && npx prisma db push
     startCommand: npm start
     healthCheckPath: /
     envVars:

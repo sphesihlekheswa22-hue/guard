@@ -185,7 +185,7 @@ exports.register = async (req, res) => {
 
     const verifyUser = await prisma.user.findUnique({ where: { id: user.id } });
     if (verifyUser) {
-      console.log("✅✅✅ VERIFIED: User exists in users table!");
+      console.log("✅✅✅ VERIFIED: User exists in user table!");
       console.log("✅ Verified user email:", verifyUser.email);
       console.log("✅ Verified user role:", verifyUser.role);
       console.log("✅ Verified user policeStationId:", verifyUser.policeStationId);
