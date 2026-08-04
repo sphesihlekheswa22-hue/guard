@@ -36,14 +36,14 @@ const Landing = () => {
         backgroundImage: `url(/gbv-bg.png)`,
         backgroundSize: "cover",
         backgroundRepeat: "no-repeat",
-        backgroundPosition: "center",
+        backgroundPosition: "center center",
       }}
     >
-      {/* Light overlay so the photo doesn't look dark */}
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(255,255,255,0.92))]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(199_89%_48%/0.16),transparent_45%)]" />
+      {/* Soft light wash — photo stays visible, not dark and not over-bright */}
+      <div className="pointer-events-none absolute inset-0 bg-white/35" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.2),transparent_70%)]" />
 
-      <div className="relative z-10 w-full max-w-3xl rounded-[1.75rem] border border-white/25 bg-white/85 p-6 text-center backdrop-blur-sm shadow-soft sm:p-10 md:p-12">
+      <div className="relative z-10 w-full max-w-3xl rounded-[1.75rem] border border-white/60 bg-white/92 p-6 text-center shadow-soft backdrop-blur-md sm:p-10 md:p-12">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
           <Shield className="h-7 w-7 text-primary" />
         </div>
@@ -61,7 +61,7 @@ const Landing = () => {
               <Link
                 key={role.title}
                 to={role.link}
-                className="group flex flex-col items-center gap-3 rounded-xl border border-border/70 bg-white/90 p-5 shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
+                className="group flex flex-col items-center gap-3 rounded-xl border border-border/70 bg-white p-5 shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
                   <role.icon className="h-6 w-6" />
