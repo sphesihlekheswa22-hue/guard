@@ -30,16 +30,8 @@ const roles = [
 
 const Landing = () => {
   return (
-    <div
-      className="flex min-h-svh items-center justify-center px-4 py-8"
-      style={{
-        backgroundImage: `url(/gbv-bg.png)`,
-        backgroundSize: "cover",
-        backgroundRepeat: "no-repeat",
-        backgroundPosition: "center",
-      }}
-    >
-      <div className="w-full max-w-3xl rounded-2xl border border-border bg-card p-6 text-center shadow-lg sm:p-10 md:p-12">
+    <div className="flex min-h-svh items-center justify-center bg-white px-4 py-8">
+      <div className="w-full max-w-3xl rounded-2xl border border-border bg-white p-6 text-center shadow-sm sm:p-10 md:p-12">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
           <Shield className="h-7 w-7 text-primary" />
         </div>
