@@ -58,6 +58,7 @@ const start = async () => {
   app.use("/api/cases", require("./src/routes/caseRoutes"));
   app.use("/api/evidence", require("./src/routes/evidenceRoutes"));
   app.use("/api/location", require("./src/routes/locationRoutes"));
+  app.use("/api/safety-map", require("./src/routes/safetyMapRoutes"));
   app.use("/api/notifications", require("./src/routes/notificationRoutes"));
   app.use("/api/organizations", require("./src/routes/organizationRoutes"));
   app.use("/api/admin", require("./src/routes/adminRoutes"));

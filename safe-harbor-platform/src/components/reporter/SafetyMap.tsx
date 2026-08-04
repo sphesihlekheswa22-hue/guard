@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, MapPin, Shield, Loader2 } from "lucide-react";
+import { AlertTriangle, MapPin, Shield, Loader2, MousePointerClick } from "lucide-react";
+import { API_BASE_URL } from "@/lib/api";
 import "leaflet/dist/leaflet.css";
 
-// Fix Leaflet marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
@@ -13,7 +13,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
-// Custom icons for different marker types
 const userIcon = new L.Icon({
   iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
   shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
@@ -23,50 +22,68 @@ const userIcon = new L.Icon({
   shadowSize: [41, 41],
 });
 
+const clickIcon = new L.Icon({
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+});
+
+const SOSHANGUVE_CENTER: [number, number] = [-25.5228, 28.0995];
+
+type RiskLevel = "High" | "Medium" | "Low" | "Unknown";
+
+interface RiskArea {
+  name: string;
+  risk: RiskLevel;
+  lat: number;
+  lng: number;
+  incidents: number;
+}
+
+interface SafetyAssessment {
+  latitude: number;
+  longitude: number;
+  inSoshanguve: boolean;
+  radiusMeters: number;
+  lookbackDays: number;
+  risk: RiskLevel;
+  summary: string;
+  nearbyIncidents: number;
+  sosNearby: number;
+  nearest: { distanceMeters: number; label: string; source: string } | null;
+  disclaimer: string;
+}
+
 const riskColor = (risk: string) => {
   switch (risk) {
     case "High":
       return "bg-emergency/10 text-emergency border-emergency/30";
     case "Medium":
       return "bg-warning/10 text-warning border-warning/30";
+    case "Unknown":
+      return "bg-muted text-muted-foreground border-border";
     default:
       return "bg-safe/10 text-safe border-safe/30";
   }
 };
 
-// Generate fake risk areas around a given location
-const generateRiskAreas = (centerLat: number, centerLng: number) => {
-  const riskAreas = [
-    { name: "Downtown District", risk: "High", offset: { lat: 0.005, lng: 0.005 } },
-    { name: "Industrial Zone", risk: "High", offset: { lat: -0.008, lng: 0.012 } },
-    { name: "Market Area", risk: "Medium", offset: { lat: 0.002, lng: -0.003 } },
-    { name: "Bus Terminal", risk: "High", offset: { lat: -0.003, lng: 0.008 } },
-    { name: "Residential Block C", risk: "Medium", offset: { lat: -0.007, lng: -0.008 } },
-    { name: "University Surroundings", risk: "Low", offset: { lat: 0.008, lng: -0.006 } },
-    { name: "Shopping Center", risk: "Medium", offset: { lat: 0.010, lng: 0.003 } },
-    { name: "Park Area", risk: "Low", offset: { lat: -0.010, lng: 0.010 } },
-    { name: "Railway Station", risk: "High", offset: { lat: 0.006, lng: -0.010 } },
-  ];
-
-  return riskAreas.map((area) => ({
-    ...area,
-    lat: centerLat + area.offset.lat,
-    lng: centerLng + area.offset.lng,
-    incidents:
-      area.risk === "High"
-        ? Math.floor(Math.random() * 15) + 15
-        : area.risk === "Medium"
-          ? Math.floor(Math.random() * 8) + 5
-          : Math.floor(Math.random() * 4) + 1,
-  }));
+const riskPathColors: Record<string, { color: string; fillColor: string }> = {
+  High: { color: "#ef4444", fillColor: "#fca5a5" },
+  Medium: { color: "#f59e0b", fillColor: "#fcd34d" },
+  Low: { color: "#10b981", fillColor: "#a7f3d0" },
+  Unknown: { color: "#94a3b8", fillColor: "#cbd5e1" },
 };
 
-interface RiskArea {
-  name: string;
-  risk: "High" | "Medium" | "Low";
-  lat: number;
-  lng: number;
-  incidents: number;
+function MapClickHandler({ onPick }: { onPick: (lat: number, lng: number) => void }) {
+  useMapEvents({
+    click(e) {
+      onPick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
 }
 
 const SafetyMap = () => {
@@ -74,35 +91,82 @@ const SafetyMap = () => {
   const [userLng, setUserLng] = useState<number | null>(null);
   const [riskAreas, setRiskAreas] = useState<RiskArea[]>([]);
   const [loading, setLoading] = useState(true);
+  const [assessing, setAssessing] = useState(false);
+  const [assessment, setAssessment] = useState<SafetyAssessment | null>(null);
+  const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Get user's current location
+    const token = localStorage.getItem("token");
+
+    const loadHotspots = async () => {
+      if (!token) return;
+      try {
+        const res = await fetch(`${API_BASE_URL}/safety-map/hotspots`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.hotspots)) {
+          setRiskAreas(data.hotspots);
+        }
+      } catch {
+        // Keep map usable even if hotspots fail
+      }
+    };
+
+    loadHotspots();
+
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          setUserLat(lat);
-          setUserLng(lng);
-          // Generate risk areas around user's location
-          setRiskAreas(generateRiskAreas(lat, lng));
+          setUserLat(pos.coords.latitude);
+          setUserLng(pos.coords.longitude);
           setLoading(false);
         },
-        (error) => {
-          console.warn("Geolocation error:", error);
-          // Fallback to default location (Nairobi, Kenya)
-          const defaultLat = -1.2921;
-          const defaultLng = 36.8219;
-          setUserLat(defaultLat);
-          setUserLng(defaultLng);
-          setRiskAreas(generateRiskAreas(defaultLat, defaultLng));
+        () => {
+          setUserLat(SOSHANGUVE_CENTER[0]);
+          setUserLng(SOSHANGUVE_CENTER[1]);
           setLoading(false);
         }
       );
+    } else {
+      setUserLat(SOSHANGUVE_CENTER[0]);
+      setUserLng(SOSHANGUVE_CENTER[1]);
+      setLoading(false);
     }
   }, []);
 
-  if (loading) {
+  const assessLocation = async (lat: number, lng: number) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setError("Please sign in again to check area safety.");
+      return;
+    }
+
+    setPicked({ lat, lng });
+    setAssessing(true);
+    setError(null);
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/safety-map/assess?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || data.msg || "Could not assess this location");
+      }
+      setAssessment(data as SafetyAssessment);
+    } catch (err) {
+      setAssessment(null);
+      setError(err instanceof Error ? err.message : "Could not assess this location");
+    } finally {
+      setAssessing(false);
+    }
+  };
+
+  if (loading || userLat === null || userLng === null) {
     return (
       <div className="p-8 text-center flex items-center justify-center gap-2">
         <Loader2 className="h-5 w-5 animate-spin" />
@@ -113,22 +177,23 @@ const SafetyMap = () => {
 
   return (
     <div className="space-y-6">
-      {/* Welcome Card */}
       <div className="rounded-2xl border border-warning/25 bg-gradient-to-br from-warning/[0.1] to-accent/[0.05] p-6 shadow-soft flex flex-col gap-1">
         <h2 className="text-2xl font-bold text-gray-800 mb-1">Safety Map</h2>
         <p className="text-base text-gray-700">
-          View high-risk areas and safety information around your current location. Make informed decisions about your safety and surroundings.
+          Tap any place on the map to check whether that area has fewer or more recent SafeGuard reports.
+          Especially useful if you are new to Soshanguve and want a quick local safety signal.
         </p>
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">High-risk areas for gender-based violence near you</p>
-          {userLat && userLng && (
-            <p className="text-xs text-muted-foreground mt-1">
-              📍 Your location: {userLat.toFixed(4)}, {userLng.toFixed(4)}
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+            <MousePointerClick className="h-4 w-4 shrink-0" />
+            Click the map to check if a spot looks safer or higher risk
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Your location: {userLat.toFixed(4)}, {userLng.toFixed(4)}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="outline" className="bg-emergency/10 text-emergency border-emergency/30 gap-1">
@@ -143,74 +208,121 @@ const SafetyMap = () => {
         </div>
       </div>
 
-      {/* Interactive Leaflet Map */}
-      {userLat !== null && userLng !== null && (
-        <div className="h-[320px] overflow-hidden rounded-lg border border-border shadow-sm sm:h-[400px]">
-          <MapContainer
-            center={[userLat, userLng] as [number, number]}
-            zoom={14}
-            style={{ height: "100%", width: "100%" }}
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            {/* User Location Marker */}
-            <Marker position={[userLat, userLng] as [number, number]} icon={userIcon}>
+      <div className="h-[320px] overflow-hidden rounded-lg border border-border shadow-sm sm:h-[400px]">
+        <MapContainer center={[userLat, userLng]} zoom={14} style={{ height: "100%", width: "100%" }}>
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <MapClickHandler onPick={assessLocation} />
+
+          <Marker position={[userLat, userLng]} icon={userIcon}>
+            <Popup>
+              <div className="text-sm font-medium">Your Current Location</div>
+            </Popup>
+          </Marker>
+
+          {picked && (
+            <Marker position={[picked.lat, picked.lng]} icon={clickIcon}>
               <Popup>
-                <div className="text-sm font-medium">Your Current Location</div>
+                <div className="text-sm space-y-1">
+                  <p className="font-medium">Selected spot</p>
+                  {assessing ? (
+                    <p className="text-xs text-muted-foreground">Checking safety…</p>
+                  ) : assessment ? (
+                    <>
+                      <Badge variant="outline" className={riskColor(assessment.risk)}>
+                        {assessment.risk === "Low" ? "Lower risk" : `${assessment.risk} risk`}
+                      </Badge>
+                      <p className="text-xs text-muted-foreground">
+                        {assessment.nearbyIncidents} nearby report(s) in ~{assessment.radiusMeters}m
+                      </p>
+                    </>
+                  ) : null}
+                </div>
               </Popup>
             </Marker>
+          )}
 
-            {/* Risk Area Markers */}
-            {riskAreas.map((area) => {
-              const riskColors: { [key: string]: { color: string; fillColor: string } } = {
-                High: { color: "#ef4444", fillColor: "#fca5a5" },
-                Medium: { color: "#f59e0b", fillColor: "#fcd34d" },
-                Low: { color: "#10b981", fillColor: "#a7f3d0" },
-              };
-              const colors = riskColors[area.risk] || riskColors.Low;
-              
-              return (
-                <CircleMarker
-                  key={area.name}
-                  center={[area.lat, area.lng] as [number, number]}
-                  radius={10}
-                  pathOptions={{
-                    color: colors.color,
-                    fillColor: colors.fillColor,
-                    fillOpacity: 0.8,
-                    weight: 2,
-                  }}
-                >
-                  <Popup>
-                    <div className="space-y-1">
-                      <p className="font-medium text-foreground">{area.name}</p>
-                      <p className="text-xs text-muted-foreground">{area.incidents} incidents reported</p>
-                      <Badge variant="outline" className={riskColor(area.risk)}>
-                        {area.risk} Risk
-                      </Badge>
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              );
-            })}
-          </MapContainer>
+          {riskAreas.map((area) => {
+            const colors = riskPathColors[area.risk] || riskPathColors.Low;
+            return (
+              <CircleMarker
+                key={`${area.name}-${area.lat}-${area.lng}`}
+                center={[area.lat, area.lng]}
+                radius={10}
+                eventHandlers={{
+                  click: (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    assessLocation(area.lat, area.lng);
+                  },
+                }}
+                pathOptions={{
+                  color: colors.color,
+                  fillColor: colors.fillColor,
+                  fillOpacity: 0.8,
+                  weight: 2,
+                }}
+              >
+                <Popup>
+                  <div className="space-y-1">
+                    <p className="font-medium text-foreground">{area.name}</p>
+                    <p className="text-xs text-muted-foreground">{area.incidents} incidents reported</p>
+                    <Badge variant="outline" className={riskColor(area.risk)}>
+                      {area.risk} Risk
+                    </Badge>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            );
+          })}
+        </MapContainer>
+      </div>
+
+      {(assessing || assessment || error) && (
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-semibold text-foreground">Area safety check</h3>
+            {assessing ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : assessment ? (
+              <Badge variant="outline" className={riskColor(assessment.risk)}>
+                {assessment.risk === "Low" ? "Lower risk" : `${assessment.risk} risk`}
+              </Badge>
+            ) : null}
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          {assessment && !assessing && (
+            <>
+              <p className="text-sm text-foreground">{assessment.summary}</p>
+              <p className="text-xs text-muted-foreground">
+                {assessment.nearbyIncidents} incident(s) within ~{assessment.radiusMeters}m
+                {assessment.sosNearby ? ` · ${assessment.sosNearby} SOS/emergency nearby` : ""}
+                {assessment.nearest
+                  ? ` · nearest ~${assessment.nearest.distanceMeters}m (${assessment.nearest.label})`
+                  : ""}
+              </p>
+              <p className="text-xs text-muted-foreground">{assessment.disclaimer}</p>
+            </>
+          )}
         </div>
       )}
 
-      {/* Risk areas list */}
       <div className="grid gap-3">
-        <h3 className="font-semibold text-foreground">Reported High-Risk Areas Near You</h3>
+        <h3 className="font-semibold text-foreground">Reported areas near Soshanguve</h3>
         {riskAreas.length > 0 ? (
           riskAreas.map((area) => {
             const distance = (
-              Math.sqrt(Math.pow(area.lat - userLat!, 2) + Math.pow(area.lng - userLng!, 2)) * 111
+              Math.sqrt(Math.pow(area.lat - userLat, 2) + Math.pow(area.lng - userLng, 2)) * 111
             ).toFixed(1);
             return (
-              <div
-                key={area.name}
-                className="bg-card rounded-lg p-4 border border-border/50 shadow-sm flex flex-col gap-3 hover:shadow-md transition-shadow sm:flex-row sm:items-center sm:justify-between"
+              <button
+                key={`${area.name}-${area.lat}-${area.lng}`}
+                type="button"
+                onClick={() => assessLocation(area.lat, area.lng)}
+                className="bg-card rounded-lg p-4 border border-border/50 shadow-sm flex flex-col gap-3 hover:shadow-md transition-shadow sm:flex-row sm:items-center sm:justify-between text-left"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <MapPin className="h-5 w-5 text-muted-foreground shrink-0" />
@@ -224,19 +336,20 @@ const SafetyMap = () => {
                 <Badge variant="outline" className={`${riskColor(area.risk)} w-fit`}>
                   {area.risk} Risk
                 </Badge>
-              </div>
+              </button>
             );
           })
         ) : (
-          <div className="text-center text-muted-foreground py-4">No risk areas found</div>
+          <div className="text-center text-muted-foreground py-4 rounded-lg border border-dashed">
+            No clustered hotspots yet. Tap the map to check any spot using recent reports.
+          </div>
         )}
       </div>
 
-      {/* Safety Statistics */}
       <div className="grid grid-cols-1 gap-4 mt-6 sm:grid-cols-3">
         {[
           {
-            label: "Total Incidents",
+            label: "Mapped Incidents",
             value: riskAreas.reduce((sum, area) => sum + area.incidents, 0),
             color: "text-emergency",
           },
@@ -245,7 +358,11 @@ const SafetyMap = () => {
             value: riskAreas.filter((a) => a.risk === "High").length,
             color: "text-emergency",
           },
-          { label: "Safe Zones", value: riskAreas.filter((a) => a.risk === "Low").length, color: "text-safe" },
+          {
+            label: "Lower Risk Zones",
+            value: riskAreas.filter((a) => a.risk === "Low").length,
+            color: "text-safe",
+          },
         ].map((stat) => (
           <div key={stat.label} className="bg-card rounded-lg p-4 border border-border/50 shadow-sm text-center">
             <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
