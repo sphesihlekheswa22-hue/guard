@@ -20,18 +20,6 @@ const RESET_TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const hashResetToken = (token = "") =>
   crypto.createHash("sha256").update(String(token)).digest("hex");
 
-const getAdminAllowlist = () =>
-  String(process.env.ADMIN_EMAILS || process.env.ADMIN_EMAIL || "")
-    .split(",")
-    .map((email) => normalizeEmail(email))
-    .filter(Boolean);
-
-const isAllowlistedAdmin = (email) => {
-  const allowlist = getAdminAllowlist();
-  if (allowlist.length === 0) return false;
-  return allowlist.includes(normalizeEmail(email));
-};
-
 const buildAuthUser = (user) => {
   const u = serializeUser(user);
   return {
