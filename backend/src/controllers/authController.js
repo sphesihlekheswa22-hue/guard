@@ -231,14 +231,8 @@ exports.login = async (req, res) => {
   const match = await bcrypt.compare(password, user.password);
   if (!match) return res.status(400).json({ msg: "Invalid credentials" });
 
-  if (user.role === "admin") {
-    const allowlist = getAdminAllowlist();
-    if (allowlist.length > 0 && !allowlist.includes(normalizeEmail(user.email))) {
-      return res.status(403).json({
-        msg: "Admin access is restricted. Only the designated admin account can sign in.",
-      });
-    }
-  }
+  // Admin registration is disabled separately. Do not re-check ADMIN_EMAILS on login,
+  // or changing the admin profile email locks the account out until Render env is updated.
 
   const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET);
   await createAuthSession(user.id, token);

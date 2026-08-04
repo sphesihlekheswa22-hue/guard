@@ -263,7 +263,7 @@ const AuthPage = () => {
 
         if (!response.ok) {
           toast({
-            title: "Authentication failed",
+            title: response.status === 403 ? "Access denied" : "Authentication failed",
             description: data.msg || "An error occurred. Please try again.",
             variant: "destructive",
           });
