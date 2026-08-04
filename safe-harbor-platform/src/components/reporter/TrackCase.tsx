@@ -4,9 +4,292 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, Trash2, CheckCircle, Clock, Play, X, AlertTriangle, LocateFixed, MapPin } from "lucide-react";
+import { Eye, Trash2, CheckCircle, Clock, Play, X, AlertTriangle, LocateFixed, MapPin, Download } from "lucide-react";
 import { socketService } from "@/services/socketService";
-import { uploadUrl, evidenceUrl } from "@/lib/api";
+import { evidenceUrl } from "@/lib/api";
+
+const normalizePdfText = (value: any) =>
+  String(value ?? "N/A")
+    .replace(/\r?\n/g, " ")
+    .replace(/[^\x20-\x7E]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const escapePdfText = (value: any) =>
+  normalizePdfText(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+
+const wrapPdfText = (text: any, width: number, fontSize = 8, maxLines?: number) => {
+  const maxChars = Math.max(10, Math.floor(width / (fontSize * 0.52)));
+  const words = normalizePdfText(text).split(" ");
+  const lines: string[] = [];
+  let current = "";
+
+  words.forEach((word) => {
+    if (!word) return;
+    if (`${current} ${word}`.trim().length > maxChars) {
+      if (current) lines.push(current);
+      current = word;
+    } else {
+      current = `${current} ${word}`.trim();
+    }
+  });
+  if (current) lines.push(current);
+  const wrapped = lines.length ? lines : ["N/A"];
+  if (!maxLines || wrapped.length <= maxLines) return wrapped;
+  const visible = wrapped.slice(0, maxLines);
+  visible[visible.length - 1] = `${visible[visible.length - 1].slice(0, Math.max(0, maxChars - 3))}...`;
+  return visible;
+};
+
+const formatPdfDateTime = (date?: string) => (date ? new Date(date).toLocaleString() : "N/A");
+const formatPdfDate = (date?: string) => (date ? new Date(date).toLocaleDateString() : "N/A");
+
+const getStatusLabel = (status = "pending") => {
+  const map: Record<string, string> = {
+    pending: "Pending",
+    investigating: "Investigating",
+    referred_to_ngo: "Referred to NGO",
+    call_initiated: "Call Initiated",
+    arranged_counselling: "Counselling Arranged",
+    resolved: "Resolved",
+    active: "Active",
+  };
+  return map[status] || status.replace(/_/g, " ");
+};
+
+const formatCaseLocation = (location: any) => {
+  if (!location) return "N/A";
+  if (typeof location === "string") return location || "N/A";
+  return location.address || (Array.isArray(location.coordinates) ? location.coordinates.join(", ") : "N/A");
+};
+
+const pdfText = (text: any, x: number, y: number, size = 8, color = "0.12 0.16 0.22", font = "F1") =>
+  `BT /${font} ${size} Tf ${color} rg 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${escapePdfText(text)}) Tj ET`;
+
+const pdfRect = (x: number, y: number, width: number, height: number, fill?: string, stroke = "0.78 0.82 0.88") => {
+  const parts = [];
+  if (fill) parts.push(`q ${fill} rg ${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re f Q`);
+  parts.push(`q ${stroke} RG 0.6 w ${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re S Q`);
+  return parts.join("\n");
+};
+
+const buildPdfDocument = (pages: string[][], pageWidth: number, pageHeight: number) => {
+  const objects: string[] = [];
+  objects.push("<< /Type /Catalog /Pages 2 0 R >>");
+  objects.push(`<< /Type /Pages /Kids [${pages.map((_, i) => `${3 + i * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`);
+
+  pages.forEach((pageCommands, index) => {
+    const pageObjectNumber = 3 + index * 2;
+    const contentObjectNumber = pageObjectNumber + 1;
+    const content = [
+      ...pageCommands,
+      pdfText(`Page ${index + 1} of ${pages.length}`, pageWidth - 92, 18, 7, "0.45 0.49 0.56"),
+    ].join("\n");
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> >> >> /Contents ${contentObjectNumber} 0 R >>`
+    );
+    objects.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+  });
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${offset.toString().padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return new Blob([pdf], { type: "application/pdf" });
+};
+
+const buildReporterCasesPdf = (reports: any[], reporterEmail = "") => {
+  const pageWidth = 842;
+  const pageHeight = 595;
+  const margin = 32;
+  const contentWidth = pageWidth - margin * 2;
+  const colors = {
+    navy: "0.08 0.16 0.28",
+    text: "0.12 0.16 0.22",
+    muted: "0.42 0.46 0.53",
+    border: "0.78 0.82 0.88",
+    headerFill: "0.91 0.94 0.98",
+    softFill: "0.97 0.98 1",
+    cardBlue: "0.90 0.95 1",
+    cardGreen: "0.91 0.98 0.94",
+    cardAmber: "1 0.96 0.86",
+    cardPurple: "0.94 0.91 1",
+    white: "1 1 1",
+  };
+
+  const pages: string[][] = [];
+  let commands: string[] = [];
+  let y = pageHeight - margin;
+
+  const addPage = () => {
+    if (commands.length) pages.push(commands);
+    commands = [];
+    y = pageHeight - margin;
+  };
+  const ensureSpace = (height: number) => {
+    if (y - height < margin + 18) addPage();
+  };
+  const addText = (text: any, x: number, textY: number, size = 8, color = colors.text, font = "F1") => {
+    commands.push(pdfText(text, x, textY, size, color, font));
+  };
+  const addRect = (x: number, rectY: number, width: number, height: number, fill?: string, stroke = colors.border) => {
+    commands.push(pdfRect(x, rectY, width, height, fill, stroke));
+  };
+
+  const drawTableRow = (
+    cells: any[],
+    widths: number[],
+    options: { header?: boolean; minHeight?: number; maxLines?: number; fill?: string } = {}
+  ) => {
+    const fontSize = options.header ? 7.5 : 7.2;
+    const lineHeight = 9;
+    const wrappedCells = cells.map((cell, index) => wrapPdfText(cell, widths[index] - 10, fontSize, options.maxLines));
+    const rowHeight = Math.max(options.minHeight || 24, Math.max(...wrappedCells.map((lines) => lines.length)) * lineHeight + 12);
+    ensureSpace(rowHeight);
+    let x = margin;
+    wrappedCells.forEach((lines, index) => {
+      addRect(x, y - rowHeight, widths[index], rowHeight, options.fill || (options.header ? colors.headerFill : colors.white));
+      lines.forEach((line, lineIndex) => {
+        addText(line, x + 5, y - 14 - lineIndex * lineHeight, fontSize, options.header ? colors.navy : colors.text, options.header ? "F2" : "F1");
+      });
+      x += widths[index];
+    });
+    y -= rowHeight;
+  };
+
+  const drawSectionTitle = (title: string) => {
+    ensureSpace(32);
+    y -= 12;
+    addRect(margin, y - 20, contentWidth, 20, colors.navy, colors.navy);
+    addText(title, margin + 8, y - 14, 10, colors.white, "F2");
+    y -= 20;
+  };
+
+  const drawKeyValueTable = (title: string, rows: Array<[string, any]>) => {
+    drawSectionTitle(title);
+    rows.forEach(([label, value], index) => {
+      const labelWidth = 138;
+      const valueWidth = contentWidth - labelWidth;
+      const valueLines = wrapPdfText(value, valueWidth - 12, 7.5);
+      const rowHeight = Math.max(24, valueLines.length * 10 + 12);
+      ensureSpace(rowHeight);
+      addRect(margin, y - rowHeight, labelWidth, rowHeight, colors.headerFill);
+      addRect(margin + labelWidth, y - rowHeight, valueWidth, rowHeight, index % 2 === 0 ? colors.white : colors.softFill);
+      addText(label, margin + 6, y - 15, 7.5, colors.navy, "F2");
+      valueLines.forEach((line, lineIndex) => {
+        addText(line, margin + labelWidth + 6, y - 15 - lineIndex * 10, 7.5);
+      });
+      y -= rowHeight;
+    });
+  };
+
+  const resolved = reports.filter((r) => r.status === "resolved").length;
+  const investigating = reports.filter((r) => r.status === "investigating").length;
+  const referred = reports.filter((r) =>
+    ["referred_to_ngo", "call_initiated", "arranged_counselling"].includes(r.status)
+  ).length;
+
+  addRect(0, pageHeight - 78, pageWidth, 78, colors.navy, colors.navy);
+  addText("SafeGuard Reporter Case Summary", margin, pageHeight - 38, 18, colors.white, "F2");
+  addText(
+    `${reporterEmail || "Reporter"} | Generated ${formatPdfDateTime(new Date().toISOString())}`,
+    margin,
+    pageHeight - 58,
+    9,
+    "0.86 0.91 0.98"
+  );
+  y = pageHeight - 104;
+
+  const cardWidth = (contentWidth - 36) / 4;
+  [
+    ["Total Cases", reports.length, colors.cardBlue],
+    ["Investigating", investigating, colors.cardAmber],
+    ["Referred to NGO", referred, colors.cardPurple],
+    ["Resolved", resolved, colors.cardGreen],
+  ].forEach(([label, value, fill], index) => {
+    const x = margin + index * (cardWidth + 12);
+    addRect(x, y - 58, cardWidth, 58, fill as string);
+    addText(label, x + 12, y - 19, 8, colors.muted, "F2");
+    addText(value, x + 12, y - 43, 20, colors.navy, "F2");
+  });
+  y -= 82;
+
+  drawSectionTitle("Case Summary");
+  const summaryWidths = [90, 100, 120, 90, 150, contentWidth - 550];
+  drawTableRow(["Case ID", "Status", "Type", "Date", "Location", "Description"], summaryWidths, {
+    header: true,
+    minHeight: 26,
+  });
+  reports.forEach((report) => {
+    drawTableRow(
+      [
+        report.caseId || "N/A",
+        getStatusLabel(report.status || "pending"),
+        report.incidentType || report.type || "Report",
+        formatPdfDate(report.createdAt || report.date),
+        formatCaseLocation(report.location),
+        report.description || "No description",
+      ],
+      summaryWidths,
+      { minHeight: 34, maxLines: 3 }
+    );
+  });
+
+  reports.forEach((report, index) => {
+    const evidence = report.evidenceIds || report.evidenceFiles || [];
+    drawKeyValueTable(`Case Detail ${index + 1}: ${report.caseId || "N/A"}`, [
+      ["Case ID", report.caseId || "N/A"],
+      ["Status", getStatusLabel(report.status || "pending")],
+      ["Incident Type", report.incidentType || report.type || "N/A"],
+      ["Description", report.description || "N/A"],
+      ["Location", formatCaseLocation(report.location)],
+      ["Created", formatPdfDateTime(report.createdAt || report.dateTime || report.date)],
+      ["Last Updated", formatPdfDateTime(report.updatedAt)],
+      ["Assigned NGO", report.referredNgoName || report.referredNgoId || "Not assigned by police yet"],
+      ["Evidence Files", Array.isArray(evidence) ? evidence.length : report.evidence || 0],
+    ]);
+
+    if (Array.isArray(evidence) && evidence.length > 0) {
+      drawSectionTitle(`Evidence - ${report.caseId || "N/A"}`);
+      drawTableRow(["#", "Name", "Type"], [40, 420, contentWidth - 460], { header: true });
+      evidence.forEach((item: any, evidenceIndex: number) => {
+        drawTableRow(
+          [evidenceIndex + 1, item.name || "Unnamed", item.type || "file"],
+          [40, 420, contentWidth - 460],
+          { maxLines: 2 }
+        );
+      });
+    }
+
+    if (Array.isArray(report.statusHistory) && report.statusHistory.length > 0) {
+      drawSectionTitle(`Status History - ${report.caseId || "N/A"}`);
+      drawTableRow(["Status", "Role", "Date", "Reason"], [130, 100, 150, contentWidth - 380], { header: true });
+      report.statusHistory.forEach((entry: any) => {
+        drawTableRow(
+          [
+            getStatusLabel(entry.status || "pending"),
+            entry.changedByRole || "N/A",
+            formatPdfDateTime(entry.changedAt),
+            entry.reason || "N/A",
+          ],
+          [130, 100, 150, contentWidth - 380],
+          { maxLines: 3 }
+        );
+      });
+    }
+  });
+
+  if (commands.length) pages.push(commands);
+  return buildPdfDocument(pages.length ? pages : [[]], pageWidth, pageHeight);
+};
 
 const TrackCase = () => {
   const { toast } = useToast();
@@ -18,6 +301,7 @@ const TrackCase = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<"image" | "audio" | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   // Fetched cases from backend
   const [cases, setCases] = useState<any[]>([]);
@@ -1135,12 +1419,99 @@ const TrackCase = () => {
     }
   };
 
+  const handleExportPdf = async () => {
+    const reportCases = cases.filter(
+      (c) =>
+        !String(c.type || "").toLowerCase().includes("emergency") &&
+        !String(c.type || "").toLowerCase().includes("sos") &&
+        !String(c.type || "").toLowerCase().includes("alert")
+    );
+
+    if (reportCases.length === 0) {
+      toast({
+        title: "Nothing to export",
+        description: "You have no incident reports to export yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const token = localStorage.getItem("token");
+      const headers = { Authorization: token ? `Bearer ${token}` : "" };
+      const reporterEmail = localStorage.getItem("safeguard_user") || "";
+
+      const detailedReports = await Promise.all(
+        reportCases.map(async (report) => {
+          const reportId = report.id || report._id;
+          if (!reportId) return report;
+          try {
+            const [detailRes, interactionsRes] = await Promise.all([
+              fetch(`/api/reports/${reportId}`, { headers }),
+              fetch(`/api/reports/${reportId}/interactions`, { headers }),
+            ]);
+            const detail = detailRes.ok ? await detailRes.json() : report;
+            const interactions = interactionsRes.ok
+              ? await interactionsRes.json()
+              : detail.interactions || report.interactions || [];
+            return {
+              ...report,
+              ...detail,
+              caseId: detail.caseId || report.caseId,
+              evidenceIds: detail.evidenceIds || report.evidenceFiles || [],
+              interactions: Array.isArray(interactions) ? interactions : [],
+            };
+          } catch (err) {
+            console.error("Failed to fetch report details for export:", err);
+            return report;
+          }
+        })
+      );
+
+      const blob = buildReporterCasesPdf(detailedReports, reporterEmail);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `my-safeguard-cases-${new Date().toISOString().slice(0, 10)}.pdf`;
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+      toast({
+        title: "PDF exported",
+        description: `Downloaded summary of ${detailedReports.length} case(s).`,
+      });
+    } catch (err) {
+      toast({
+        title: "Export failed",
+        description: (err as Error).message || "Could not generate PDF.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
   <div className="space-y-6">
     {/* Welcome Card */}
-    <div className="rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.08] to-secondary/[0.06] p-6 shadow-soft flex flex-col gap-1">
-      <h2 className="text-2xl font-bold text-gray-800 mb-1">Track Your Case</h2>
-      <p className="text-base text-gray-700">Monitor the progress of your reported case. Check status updates, evidence review progress, and communication from police officers.</p>
+    <div className="rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.08] to-secondary/[0.06] p-6 shadow-soft flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-2xl font-bold text-gray-800 mb-1">Track Your Case</h2>
+        <p className="text-base text-gray-700">Monitor the progress of your reported case. Check status updates, evidence review progress, and communication from police officers.</p>
+      </div>
+      <Button
+        variant="outline"
+        onClick={handleExportPdf}
+        disabled={exporting || cases.length === 0}
+        className="shrink-0"
+      >
+        <Download className="h-4 w-4 mr-2" />
+        {exporting ? "Exporting..." : "Export PDF"}
+      </Button>
     </div>
 
     {/* Search Section */}
