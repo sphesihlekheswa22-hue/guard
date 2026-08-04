@@ -6,6 +6,8 @@ const {
   getDashboard,
   getUsers,
   deleteUserPermanently,
+  createStaffUser,
+  updateStaffUser,
   getAuditLogs,
   getPublicOrganizations,
   getOrganizations,
@@ -17,6 +19,8 @@ const {
 router.get("/organizations/public", getPublicOrganizations);
 router.get("/dashboard", auth, authorize("admin"), getDashboard);
 router.get("/users", auth, authorize("admin"), getUsers);
+router.post("/users", auth, authorize("admin"), createStaffUser);
+router.put("/users/:id", auth, authorize("admin"), updateStaffUser);
 router.delete("/users/:id", auth, authorize("admin"), deleteUserPermanently);
 router.get("/audit-logs", auth, authorize("admin"), getAuditLogs);
 router.get("/organizations", auth, authorize("admin"), getOrganizations);

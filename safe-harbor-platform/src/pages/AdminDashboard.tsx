@@ -283,6 +283,19 @@ const emptyOrganizationForm = {
   address: "",
 };
 
+const emptyStaffForm = {
+  _id: "",
+  fullName: "",
+  email: "",
+  password: "",
+  phone: "",
+  idNumber: "",
+  policeStationId: "",
+  policeStationName: "",
+  ngoId: "",
+  ngoName: "",
+};
+
 const AdminDashboard = () => {
   const [dashboard, setDashboard] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
@@ -291,8 +304,12 @@ const AdminDashboard = () => {
   const [orgTypeFilter, setOrgTypeFilter] = useState("");
   const [orgForm, setOrgForm] = useState(emptyOrganizationForm);
   const [showOrgForm, setShowOrgForm] = useState(false);
+  const [staffForm, setStaffForm] = useState(emptyStaffForm);
+  const [showStaffForm, setShowStaffForm] = useState(false);
+  const [staffFormRole, setStaffFormRole] = useState<"officer" | "ngo_worker">("officer");
   const [loading, setLoading] = useState(true);
   const [savingOrg, setSavingOrg] = useState(false);
+  const [savingStaff, setSavingStaff] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState("");
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [error, setError] = useState("");
@@ -454,6 +471,85 @@ const AdminDashboard = () => {
     }
   };
 
+  const openCreateStaffForm = (role: "officer" | "ngo_worker") => {
+    setStaffFormRole(role);
+    setStaffForm(emptyStaffForm);
+    setShowStaffForm(true);
+    setSelectedUser(null);
+    if (organizations.length === 0) {
+      loadOrganizations().catch(() => undefined);
+    }
+  };
+
+  const openEditStaffForm = (user: any) => {
+    const role = userBelongsToGroup(user, "ngo_worker") ? "ngo_worker" : "officer";
+    setStaffFormRole(role);
+    setStaffForm({
+      _id: user._id,
+      fullName: user.fullName || "",
+      email: user.email || "",
+      password: "",
+      phone: user.phone || "",
+      idNumber: user.idNumber || "",
+      policeStationId: user.policeStationId || "",
+      policeStationName: user.policeStationName || "",
+      ngoId: user.ngoId || "",
+      ngoName: user.ngoName || "",
+    });
+    setShowStaffForm(true);
+    setSelectedUser(null);
+    if (organizations.length === 0) {
+      loadOrganizations().catch(() => undefined);
+    }
+  };
+
+  const saveStaffUser = async () => {
+    setSavingStaff(true);
+    setError("");
+    try {
+      const payload: any = {
+        fullName: staffForm.fullName,
+        email: staffForm.email,
+        phone: staffForm.phone,
+        idNumber: staffForm.idNumber,
+        role: staffFormRole,
+      };
+
+      if (staffFormRole === "officer") {
+        payload.policeStationId = staffForm.policeStationId;
+        payload.policeStationName =
+          organizations.find((o) => o._id === staffForm.policeStationId && o.type === "police_station")?.name ||
+          staffForm.policeStationName;
+      } else {
+        payload.ngoId = staffForm.ngoId;
+        payload.ngoName =
+          organizations.find((o) => o._id === staffForm.ngoId && o.type === "ngo")?.name || staffForm.ngoName;
+      }
+
+      if (staffForm._id) {
+        if (staffForm.password.trim()) payload.password = staffForm.password;
+        await fetchJson(`/api/admin/users/${staffForm._id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        payload.password = staffForm.password;
+        await fetchJson("/api/admin/users", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      setShowStaffForm(false);
+      setStaffForm(emptyStaffForm);
+      await loadDashboard();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingStaff(false);
+    }
+  };
+
   const renderError = () => error ? (
     <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
       {error}
@@ -600,6 +696,14 @@ const AdminDashboard = () => {
         <div className="border-t border-border pt-4 space-y-3">
           <p className="text-sm font-medium text-foreground">Action</p>
           <div className="flex flex-wrap gap-2">
+            {(userBelongsToGroup(selectedUser, "police_officer") || userBelongsToGroup(selectedUser, "ngo_worker")) && (
+              <Button
+                variant="outline"
+                onClick={() => openEditStaffForm(selectedUser)}
+              >
+                Edit
+              </Button>
+            )}
             <Button
               variant="outline"
               className="text-destructive hover:text-destructive"
@@ -635,6 +739,15 @@ const AdminDashboard = () => {
             <p className="text-base text-gray-700">{description}</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
+            {(group === "police_officer" || group === "ngo_worker") && (
+              <Button
+                type="button"
+                onClick={() => openCreateStaffForm(group === "ngo_worker" ? "ngo_worker" : "officer")}
+                className="bg-primary text-primary-foreground"
+              >
+                <Plus className="mr-2 h-4 w-4" /> Add {group === "ngo_worker" ? "NGO Worker" : "Police Officer"}
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
@@ -663,7 +776,7 @@ const AdminDashboard = () => {
                   {assignmentColumns.map((column) => (
                     <th key={column.label} className="py-3 pr-4">{column.label}</th>
                   ))}
-                  <th className="py-3 pr-5">View</th>
+                  <th className="py-3 pr-5">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -682,9 +795,16 @@ const AdminDashboard = () => {
                       <td key={column.label} className="py-3 pr-4">{column.value(user)}</td>
                     ))}
                     <td className="py-3 pr-5">
-                      <Button size="sm" variant="outline" onClick={() => setSelectedUser(user)}>
-                        View
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setSelectedUser(user)}>
+                          View
+                        </Button>
+                        {(group === "police_officer" || group === "ngo_worker") && (
+                          <Button size="sm" variant="outline" onClick={() => openEditStaffForm(user)}>
+                            Edit
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -694,6 +814,94 @@ const AdminDashboard = () => {
         </div>
 
         {renderUserDetails()}
+        {showStaffForm && (group === "police_officer" || group === "ngo_worker") && renderStaffForm()}
+      </div>
+    );
+  };
+
+  const renderStaffForm = () => {
+    const policeStations = organizations.filter((organization) => organization.type === "police_station");
+    const ngos = organizations.filter((organization) => organization.type === "ngo");
+    const isEdit = Boolean(staffForm._id);
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="bg-card rounded-xl shadow-xl border border-border/60 w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-bold text-foreground">
+                {isEdit ? "Edit" : "Add"} {staffFormRole === "ngo_worker" ? "NGO Worker" : "Police Officer"}
+              </h3>
+              <p className="text-sm text-muted-foreground">Only admins can create or update staff accounts.</p>
+            </div>
+            <button type="button" onClick={() => setShowStaffForm(false)} className="p-1 hover:bg-muted rounded" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="grid gap-3">
+            <div className="space-y-1">
+              <Label>Full Name</Label>
+              <Input value={staffForm.fullName} onChange={(e) => setStaffForm((c) => ({ ...c, fullName: e.target.value }))} required />
+            </div>
+            <div className="space-y-1">
+              <Label>Email</Label>
+              <Input type="email" value={staffForm.email} onChange={(e) => setStaffForm((c) => ({ ...c, email: e.target.value }))} required />
+            </div>
+            <div className="space-y-1">
+              <Label>Phone</Label>
+              <Input value={staffForm.phone} onChange={(e) => setStaffForm((c) => ({ ...c, phone: e.target.value }))} placeholder="06XXXXXXXX" required />
+            </div>
+            <div className="space-y-1">
+              <Label>ID Number</Label>
+              <Input value={staffForm.idNumber} onChange={(e) => setStaffForm((c) => ({ ...c, idNumber: e.target.value.replace(/\D/g, "").slice(0, 13) }))} maxLength={13} required />
+            </div>
+            <div className="space-y-1">
+              <Label>{isEdit ? "New Password (optional)" : "Password"}</Label>
+              <Input type="password" value={staffForm.password} onChange={(e) => setStaffForm((c) => ({ ...c, password: e.target.value }))} required={!isEdit} />
+            </div>
+            {staffFormRole === "officer" ? (
+              <div className="space-y-1">
+                <Label>Police Station</Label>
+                <select
+                  className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm"
+                  value={staffForm.policeStationId}
+                  onChange={(e) => setStaffForm((c) => ({ ...c, policeStationId: e.target.value }))}
+                  required
+                >
+                  <option value="">Select police station</option>
+                  {policeStations.map((station) => (
+                    <option key={station._id} value={station._id}>{station.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <Label>NGO</Label>
+                <select
+                  className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm"
+                  value={staffForm.ngoId}
+                  onChange={(e) => setStaffForm((c) => ({ ...c, ngoId: e.target.value }))}
+                  required
+                >
+                  <option value="">Select NGO</option>
+                  {ngos.map((ngo) => (
+                    <option key={ngo._id} value={ngo._id}>{ngo.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => setShowStaffForm(false)} disabled={savingStaff}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={saveStaffUser} disabled={savingStaff}>
+              {savingStaff ? "Saving..." : isEdit ? "Save Changes" : "Create Account"}
+            </Button>
+          </div>
+        </div>
       </div>
     );
   };

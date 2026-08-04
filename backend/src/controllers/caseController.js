@@ -510,6 +510,12 @@ exports.updateLiveLocation = async (req, res) => {
  */
 exports.deleteCase = async (req, res) => {
   try {
+    if (req.user.role === "reporter") {
+      return res.status(403).json({
+        error: "Reporters cannot delete reports or cases.",
+      });
+    }
+
     const { id } = req.params;
     const userId = req.user.id;
 

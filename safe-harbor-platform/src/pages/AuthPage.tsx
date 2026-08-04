@@ -50,17 +50,31 @@ const normalizeFullName = (value = "") => value.trim().replace(/\s+/g, " ");
 
 const isValidFullName = (value = "") => /^[\p{L}]+(?: [\p{L}]+)*$/u.test(normalizeFullName(value));
 
+const normalizeIdNumber = (value = "") => value.replace(/\D/g, "").slice(0, 13);
+const isValidIdNumber = (value = "") => /^\d{13}$/.test(normalizeIdNumber(value));
+
+const normalizeSouthAfricanPhone = (value = "") => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.startsWith("0027")) return `0${digits.slice(4)}`.slice(0, 10);
+  if (digits.startsWith("27")) return `0${digits.slice(2)}`.slice(0, 10);
+  return digits.slice(0, 10);
+};
+const isValidSouthAfricanPhone = (value = "") => /^0[678]\d{8}$/.test(normalizeSouthAfricanPhone(value));
+
 const AUTH_API_URL = `${API_BASE_URL}/auth`;
 
 const AuthPage = () => {
   const [searchParams] = useSearchParams();
   const role = searchParams.get("role") || "reporter";
+  const staffLoginOnly = role === "authority" || role === "ngo" || role === "admin";
 
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [idNumber, setIdNumber] = useState("");
   const [selectedPoliceStation, setSelectedPoliceStation] = useState("");
   const [selectedNgo, setSelectedNgo] = useState("");
   const [policeStations, setPoliceStations] = useState<OrganizationOption[]>([]);
@@ -75,6 +89,12 @@ const AuthPage = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (staffLoginOnly) {
+      setIsLogin(true);
+    }
+  }, [staffLoginOnly]);
 
   useEffect(() => {
     const loadOrganizations = async () => {
@@ -118,6 +138,8 @@ const AuthPage = () => {
     setPassword("");
     setConfirmPassword("");
     setName("");
+    setPhone("");
+    setIdNumber("");
     setSelectedPoliceStation("");
     setSelectedNgo("");
     setShowPassword(false);
@@ -206,42 +228,45 @@ const AuthPage = () => {
 
     // Validate required registration selections
     if (!isLogin) {
-      if (role === "admin") {
+      if (staffLoginOnly || role === "admin" || role === "authority" || role === "ngo") {
         toast({
-          title: "Admin registration disabled",
-          description: "Admin accounts cannot be created here. Use an existing admin sign-in.",
+          title: "Registration disabled",
+          description:
+            role === "reporter"
+              ? "Use Sign up as Reporter."
+              : "Police officer and NGO staff accounts can only be created by an admin.",
           variant: "destructive",
         });
         return;
       }
 
-      if (role === "authority" && !selectedPoliceStation) {
+      const normalizedPhone = normalizeSouthAfricanPhone(phone);
+      if (!isValidSouthAfricanPhone(normalizedPhone)) {
+        toast({
+          title: "Invalid phone number",
+          description: "Enter a valid South African mobile number starting with 06, 07, or 08.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const normalizedId = normalizeIdNumber(idNumber);
+      if (!isValidIdNumber(normalizedId)) {
+        toast({
+          title: "Invalid ID number",
+          description: "Enter a valid 13-digit South African ID number.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (role === "reporter" && !selectedPoliceStation) {
         toast({
           title: "Police station required",
-          description: policeStations.length === 0 ? "No police stations are available from the database yet." : "Please select the police station you belong to.",
+          description: policeStations.length === 0 ? "No police stations are available from the database yet." : "Please select the police station for your report.",
           variant: "destructive",
         });
         return;
-      }
-
-      if (role === "ngo" && !selectedNgo) {
-        toast({
-          title: "NGO required",
-          description: ngoOptions.length === 0 ? "No NGOs are available from the database yet." : "Please select the NGO you belong to.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      if (role === "reporter") {
-        if (!selectedPoliceStation) {
-          toast({
-            title: "Police station required",
-            description: policeStations.length === 0 ? "No police stations are available from the database yet." : "Please select the police station for your report.",
-            variant: "destructive",
-          });
-          return;
-        }
       }
     }
 
@@ -303,18 +328,10 @@ const AuthPage = () => {
           fullName: normalizedName,
           email: normalizedEmail,
           password,
+          phone: normalizeSouthAfricanPhone(phone),
+          idNumber: normalizeIdNumber(idNumber),
           role: signupRole,
         };
-
-        if (signupRole === "officer") {
-          signupPayload.policeStationId = selectedPoliceStation;
-          signupPayload.policeStationName = SOSHANGUVE_STATION_NAME;
-        }
-
-        if (signupRole === "ngo_worker") {
-          signupPayload.ngoId = selectedNgo;
-          signupPayload.ngoName = ngoOptions.find((item) => item.id === selectedNgo)?.label || "";
-        }
 
         if (signupRole === "reporter") {
           signupPayload.policeStationId = selectedPoliceStation;
@@ -510,44 +527,6 @@ const AuthPage = () => {
             </div>
           )}
 
-          {!isLogin && role === "authority" && (
-            <div className="space-y-2">
-              <Label htmlFor="policeStation">Police Station</Label>
-              <select
-                id="policeStation"
-                value={selectedPoliceStation}
-                onChange={(e) => setSelectedPoliceStation(e.target.value)}
-                className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                disabled={organizationsLoading || policeStations.length === 0}
-                required
-              >
-                <option value="">{organizationsLoading ? "Loading police stations..." : policeStations.length === 0 ? "No police stations available" : "Select your police station"}</option>
-                {policeStations.map((station) => (
-                  <option key={station.id} value={station.id}>{station.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {!isLogin && role === "ngo" && (
-            <div className="space-y-2">
-              <Label htmlFor="ngo">NGO</Label>
-              <select
-                id="ngo"
-                value={selectedNgo}
-                onChange={(e) => setSelectedNgo(e.target.value)}
-                className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                disabled={organizationsLoading || ngoOptions.length === 0}
-                required
-              >
-                <option value="">{organizationsLoading ? "Loading NGOs..." : ngoOptions.length === 0 ? "No NGOs available" : "Select your NGO"}</option>
-                {ngoOptions.map((ngo) => (
-                  <option key={ngo.id} value={ngo.id}>{ngo.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
           {!isLogin && role === "reporter" && (
             <div className="space-y-2">
               <Label htmlFor="policeStation">Police Station</Label>
@@ -567,6 +546,41 @@ const AuthPage = () => {
               <p className="text-xs text-muted-foreground">
                 Police officers assign an NGO to your case when needed. You do not choose an NGO.
               </p>
+            </div>
+          )}
+
+          {!isLogin && (
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone Number</Label>
+              <Input
+                id="phone"
+                name="phone"
+                type="tel"
+                placeholder="06XXXXXXXX"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                onBlur={() => setPhone(normalizeSouthAfricanPhone(phone))}
+                autoComplete="off"
+                required
+              />
+              <p className="text-xs text-muted-foreground">South African mobile number starting with 06, 07, or 08.</p>
+            </div>
+          )}
+
+          {!isLogin && (
+            <div className="space-y-2">
+              <Label htmlFor="idNumber">ID Number</Label>
+              <Input
+                id="idNumber"
+                name="id-number"
+                inputMode="numeric"
+                placeholder="13-digit South African ID"
+                value={idNumber}
+                onChange={(e) => setIdNumber(normalizeIdNumber(e.target.value))}
+                autoComplete="off"
+                maxLength={13}
+                required
+              />
             </div>
           )}
 
@@ -688,9 +702,11 @@ const AuthPage = () => {
           </Button>
         </form>
 
-        {role === "admin" ? (
+        {staffLoginOnly ? (
           <p className="text-center text-sm text-muted-foreground">
-            Admin accounts are managed separately and cannot be created here.
+            {role === "admin"
+              ? "Admin accounts are managed separately and cannot be created here."
+              : "Police officer and NGO staff accounts are created by an admin. Sign in with your issued account."}
           </p>
         ) : (
           <p className="text-center text-sm text-muted-foreground">

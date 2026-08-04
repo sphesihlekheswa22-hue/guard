@@ -11,19 +11,19 @@ const roles = [
   {
     icon: Gavel,
     title: "Police Officer",
-    description: "Manage cases and emergencies.",
+    description: "Sign in to manage cases and emergencies.",
     link: "/auth?role=authority",
   },
   {
     icon: HandHeart,
     title: "Support NGO",
-    description: "Support survivors and referrals.",
+    description: "Sign in to support survivors and referrals.",
     link: "/auth?role=ngo",
   },
   {
     icon: Settings,
     title: "Admin",
-    description: "Monitor users and system activity.",
+    description: "Sign in to manage staff and system activity.",
     link: "/auth?role=admin",
   },
 ];

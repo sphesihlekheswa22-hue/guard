@@ -1,6 +1,12 @@
 const prisma = require("../config/prisma");
+const bcrypt = require("bcryptjs");
 const { logAudit } = require("../services/auditService");
-const { isSoshanguvePoliceStation, containsSoshanguve } = require("../constants/soshanguve");
+const { syncRoleProfile } = require("../services/roleProfileService");
+const {
+  isSoshanguvePoliceStation,
+  containsSoshanguve,
+  SOSHANGUVE_STATION_NAME,
+} = require("../constants/soshanguve");
 const {
   serializeUser,
   serializeReport,
@@ -428,6 +434,197 @@ exports.deleteOrganization = async (req, res, next) => {
 
     res.json({ success: true, message: "Organization removed." });
   } catch (err) {
+    next(err);
+  }
+};
+
+const normalizeEmail = (value = "") => String(value).trim().toLowerCase();
+const isValidEmail = (value = "") => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalizeEmail(value));
+const normalizeFullName = (value = "") => String(value).trim().replace(/\s+/g, " ");
+const isValidFullName = (value = "") => /^[\p{L}]+(?: [\p{L}]+)*$/u.test(normalizeFullName(value));
+const normalizeIdNumber = (value = "") => String(value).replace(/\D/g, "").slice(0, 13);
+const isValidIdNumber = (value = "") => /^\d{13}$/.test(normalizeIdNumber(value));
+const normalizeSouthAfricanPhone = (value = "") => {
+  const digits = String(value).replace(/\D/g, "");
+  if (digits.startsWith("0027")) return `0${digits.slice(4)}`.slice(0, 10);
+  if (digits.startsWith("27")) return `0${digits.slice(2)}`.slice(0, 10);
+  return digits.slice(0, 10);
+};
+const isValidSouthAfricanPhone = (value = "") => /^0[678]\d{8}$/.test(normalizeSouthAfricanPhone(value));
+
+exports.createStaffUser = async (req, res, next) => {
+  try {
+    const {
+      fullName,
+      email,
+      password,
+      phone,
+      idNumber,
+      role,
+      policeStationId,
+      policeStationName,
+      ngoId,
+      ngoName,
+    } = req.body;
+
+    const normalizedRole = role === "authority" ? "officer" : role === "ngo" ? "ngo_worker" : role;
+    if (!["officer", "ngo_worker"].includes(normalizedRole)) {
+      return res.status(400).json({ message: "Only police officer or NGO worker accounts can be created here." });
+    }
+
+    const normalizedFullName = normalizeFullName(fullName);
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPhone = normalizeSouthAfricanPhone(phone);
+    const normalizedIdNumber = normalizeIdNumber(idNumber);
+
+    if (!isValidFullName(normalizedFullName)) {
+      return res.status(400).json({ message: "Full name can only contain letters and spaces." });
+    }
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: "A valid email address is required." });
+    }
+    if (!password || String(password).length < 8) {
+      return res.status(400).json({ message: "Password must be at least 8 characters long." });
+    }
+    if (!isValidSouthAfricanPhone(normalizedPhone)) {
+      return res.status(400).json({ message: "A valid South African mobile number is required." });
+    }
+    if (!isValidIdNumber(normalizedIdNumber)) {
+      return res.status(400).json({ message: "A valid 13-digit ID number is required." });
+    }
+
+    if (normalizedRole === "officer" && !policeStationId) {
+      return res.status(400).json({ message: "Police station is required for officers." });
+    }
+    if (normalizedRole === "ngo_worker" && !ngoId) {
+      return res.status(400).json({ message: "NGO is required for NGO workers." });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existing) {
+      return res.status(409).json({ message: "An account with this email already exists." });
+    }
+
+    const hashed = await bcrypt.hash(String(password), 10);
+    const user = await prisma.user.create({
+      data: {
+        fullName: normalizedFullName,
+        email: normalizedEmail,
+        password: hashed,
+        phone: normalizedPhone,
+        idNumber: normalizedIdNumber,
+        role: normalizedRole,
+        policeStationId: normalizedRole === "officer" ? String(policeStationId) : null,
+        policeStationName:
+          normalizedRole === "officer" ? policeStationName || SOSHANGUVE_STATION_NAME : null,
+        ngoId: normalizedRole === "ngo_worker" ? String(ngoId) : null,
+        ngoName: normalizedRole === "ngo_worker" ? ngoName || null : null,
+        isVerified: true,
+      },
+    });
+
+    await syncRoleProfile(user);
+    await logAudit({
+      user: req.user,
+      action: "staff_user_created",
+      resourceType: "user",
+      resourceId: user.id,
+      resourceLabel: user.email,
+      details: `Created ${normalizedRole} account ${user.email}`,
+    });
+
+    res.status(201).json({ success: true, user: serializeUser(user) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.updateStaffUser = async (req, res, next) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    if (!["officer", "authority", "ngo_worker", "ngo"].includes(user.role)) {
+      return res.status(400).json({ message: "Only police officer or NGO worker accounts can be edited here." });
+    }
+
+    const updateData = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "fullName")) {
+      const normalizedFullName = normalizeFullName(req.body.fullName);
+      if (!isValidFullName(normalizedFullName)) {
+        return res.status(400).json({ message: "Full name can only contain letters and spaces." });
+      }
+      updateData.fullName = normalizedFullName;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
+      const normalizedEmail = normalizeEmail(req.body.email);
+      if (!isValidEmail(normalizedEmail)) {
+        return res.status(400).json({ message: "A valid email address is required." });
+      }
+      updateData.email = normalizedEmail;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "phone")) {
+      const normalizedPhone = normalizeSouthAfricanPhone(req.body.phone);
+      if (!isValidSouthAfricanPhone(normalizedPhone)) {
+        return res.status(400).json({ message: "A valid South African mobile number is required." });
+      }
+      updateData.phone = normalizedPhone;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "idNumber")) {
+      const normalizedIdNumber = normalizeIdNumber(req.body.idNumber);
+      if (!isValidIdNumber(normalizedIdNumber)) {
+        return res.status(400).json({ message: "A valid 13-digit ID number is required." });
+      }
+      updateData.idNumber = normalizedIdNumber;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "password") && String(req.body.password || "").trim()) {
+      if (String(req.body.password).length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters long." });
+      }
+      updateData.password = await bcrypt.hash(String(req.body.password), 10);
+    }
+
+    if (["officer", "authority"].includes(user.role)) {
+      if (Object.prototype.hasOwnProperty.call(req.body, "policeStationId")) {
+        updateData.policeStationId = String(req.body.policeStationId || "").trim() || null;
+        updateData.policeStationName = req.body.policeStationName || SOSHANGUVE_STATION_NAME;
+      }
+    }
+
+    if (["ngo_worker", "ngo"].includes(user.role)) {
+      if (Object.prototype.hasOwnProperty.call(req.body, "ngoId")) {
+        updateData.ngoId = String(req.body.ngoId || "").trim() || null;
+        updateData.ngoName = req.body.ngoName || null;
+      }
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: updateData,
+    });
+    await syncRoleProfile(updated);
+
+    await logAudit({
+      user: req.user,
+      action: "staff_user_updated",
+      resourceType: "user",
+      resourceId: updated.id,
+      resourceLabel: updated.email,
+      details: `Updated staff account ${updated.email}`,
+    });
+
+    res.json({ success: true, user: serializeUser(updated) });
+  } catch (err) {
+    if (err?.code === "P2002") {
+      return res.status(409).json({ message: "An account with this email already exists." });
+    }
     next(err);
   }
 };

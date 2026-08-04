@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, Trash2, CheckCircle, Clock, Play, X, AlertTriangle, LocateFixed, MapPin, Download } from "lucide-react";
+import { Eye, CheckCircle, Clock, Play, X, AlertTriangle, LocateFixed, MapPin, Download } from "lucide-react";
 import { socketService } from "@/services/socketService";
 import { evidenceUrl } from "@/lib/api";
 
@@ -1570,14 +1570,6 @@ const TrackCase = () => {
                     >
                       <Eye className="h-4 w-4 mr-2" /> Details
                     </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleDelete(c.id)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </div>
                 </div>
               </div>
@@ -1621,14 +1613,6 @@ const TrackCase = () => {
                       disabled={detailsLoading && selectedCase === c.id}
                     >
                       <Eye className="h-4 w-4 mr-2" /> Details
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleDelete(c.id)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
@@ -1983,13 +1967,9 @@ const TrackCase = () => {
                   </div>
                 )}
                 <div className="pt-4">
-                  <Button 
-                    variant="outline" 
-                    onClick={() => handleDelete(currentCase.id)}
-                    className="w-full text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" /> Delete This Case
-                  </Button>
+                  <p className="text-xs text-muted-foreground text-center">
+                    Reporters cannot delete submitted cases. Contact support if a report was submitted in error.
+                  </p>
                 </div>
               </div>
               <div className="border-t border-border/40 px-6 py-4 flex-shrink-0">
@@ -1999,34 +1979,6 @@ const TrackCase = () => {
               </div>
             </>
           ) : null}
-        </div>
-      </div>
-    )}
-
-    {/* Delete Confirmation Dialog */}
-    {deleteConfirm && (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-card rounded-lg p-6 max-w-sm w-full shadow-lg">
-          <h3 className="text-lg font-bold text-foreground mb-2">Delete Case?</h3>
-          <p className="text-sm text-muted-foreground mb-6">
-            Are you sure you want to delete case <span className="font-semibold">{deleteConfirm}</span>? This action cannot be undone.
-          </p>
-          <div className="flex gap-3 justify-end">
-            <Button 
-              variant="outline" 
-              onClick={() => setDeleteConfirm(null)}
-              disabled={deleteLoading}
-            >
-              Cancel
-            </Button>
-            <Button 
-              onClick={() => confirmDelete(deleteConfirm)}
-              className="bg-destructive hover:bg-destructive/90"
-              disabled={deleteLoading}
-            >
-              {deleteLoading ? "Deleting..." : "Delete"}
-            </Button>
-          </div>
         </div>
       </div>
     )}

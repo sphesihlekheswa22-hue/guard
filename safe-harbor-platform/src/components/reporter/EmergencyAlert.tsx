@@ -10,10 +10,9 @@ import { sendSOSEmail } from "@/lib/emailService";
 import { isSoshanguveLocation, SOSHANGUVE_LOCATION_ERROR } from "@/lib/soshanguve";
 
 const openWhatsAppLinks = (links: Array<{ link: string }>) => {
-  links.slice(0, 3).forEach((item, index) => {
-    window.setTimeout(() => {
-      window.open(item.link, "_blank", "noopener,noreferrer");
-    }, index * 400);
+  // Open immediately (no delay) so WhatsApp opens in the same user gesture chain.
+  links.forEach((item) => {
+    window.open(item.link, "_blank", "noopener,noreferrer");
   });
 };
 
@@ -27,10 +26,33 @@ const EmergencyAlert = () => {
   const [statusMessage, setStatusMessage] = useState("");
   const [sosId, setSOSId] = useState<string | null>(null);
   const [sosCaseId, setSosCaseId] = useState<string | null>(null);
+  const [cachedContacts, setCachedContacts] = useState<
+    Array<{ _id?: string; name?: string; fullName?: string; email?: string; phone?: string }>
+  >([]);
+  const [reporterName, setReporterName] = useState("A SafeGuard user");
   
   // Get auth token (adjust based on your auth implementation)
   const token = localStorage.getItem("token") || "";
   const userId = localStorage.getItem("userId") || "";
+
+  // Prefetch emergency contacts so WhatsApp can open instantly on SOS
+  useEffect(() => {
+    if (!token) return;
+    const loadContacts = async () => {
+      try {
+        const res = await fetch(apiUrl("/users/profile"), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const profile = await res.json();
+        setReporterName(profile.fullName || profile.name || "A SafeGuard user");
+        setCachedContacts(Array.isArray(profile.emergencyContacts) ? profile.emergencyContacts : []);
+      } catch {
+        // Keep SOS usable even if prefetch fails
+      }
+    };
+    loadContacts();
+  }, [token]);
 
   // Initialize socket connection on component mount
   useEffect(() => {
@@ -131,10 +153,24 @@ const EmergencyAlert = () => {
         return;
       }
 
-      // Step 2: Send SOS alert to backend
+      // Step 2: Open WhatsApp immediately with a live SOS message (before waiting on API).
       setSOSStatus("sending");
-      setStatusMessage("Sending emergency alert...");
+      setStatusMessage("Opening WhatsApp and notifying police...");
 
+      const mapLink = getMapLink(location.latitude, location.longitude);
+      const locationText = `${location.address || "Location captured"} (${mapLink})`;
+      const instantMessage = buildSosWhatsAppMessage({
+        reporterName,
+        locationText,
+        mapLink,
+        time: new Date().toLocaleString(),
+      });
+      const instantWhatsApp = buildWhatsAppNotificationsFromContacts(cachedContacts, instantMessage);
+      if (instantWhatsApp.length > 0) {
+        openWhatsAppLinks(instantWhatsApp);
+      }
+
+      // Step 3: Send SOS alert to backend
       const sosResponse = await sosService.triggerSOS(location, token);
 
       if (!sosResponse.success) {
@@ -148,31 +184,21 @@ const EmergencyAlert = () => {
         return;
       }
 
-      // Step 3: Store SOS ID and location
+      // Step 4: Store SOS ID and continue email notifications
       const caseId = sosResponse.case?._id;
       const formattedCaseId = sosResponse.case?.caseId;
-      const emergencyContacts = sosResponse.emergencyContacts || [];
+      const emergencyContacts = sosResponse.emergencyContacts || cachedContacts;
       const reporter = (sosResponse.case as any)?.userId;
-      const reporterName = reporter?.fullName || reporter?.name || "A SafeGuard user";
-      const mapLink = getMapLink(location.latitude, location.longitude);
-      const locationText = `${location.address || "Location captured"} (${mapLink})`;
-      const sosMessage =
-        sosResponse.sosMessage ||
-        buildSosWhatsAppMessage({
-          reporterName,
-          locationText,
-          mapLink,
-          time: new Date().toLocaleString(),
-        });
+      const resolvedReporterName = reporter?.fullName || reporter?.name || reporterName;
+      const sosMessage = sosResponse.sosMessage || instantMessage;
 
-      // Open WhatsApp immediately (still within the user-gesture chain) before awaiting emails,
-      // otherwise browsers block the popups.
+      // If backend returned additional WhatsApp targets not opened yet, open them now.
       let whatsappNotifications = sosResponse.whatsappNotifications || [];
-      if (whatsappNotifications.length === 0 && emergencyContacts.length > 0) {
+      if (whatsappNotifications.length === 0 && emergencyContacts.length > 0 && instantWhatsApp.length === 0) {
         whatsappNotifications = buildWhatsAppNotificationsFromContacts(emergencyContacts, sosMessage);
-      }
-      if (whatsappNotifications.length > 0) {
-        openWhatsAppLinks(whatsappNotifications);
+        if (whatsappNotifications.length > 0) {
+          openWhatsAppLinks(whatsappNotifications);
+        }
       }
 
       let emailNotifications = sosResponse.emailNotifications || {
@@ -203,7 +229,7 @@ const EmergencyAlert = () => {
               await sendSOSEmail({
                 email: contact.email,
                 to_name: contactName,
-                reporter_name: reporterName,
+                reporter_name: resolvedReporterName,
                 message: sosMessage || "Emergency SOS Triggered",
                 location: locationText,
                 time: new Date().toLocaleString(),
@@ -247,8 +273,9 @@ const EmergencyAlert = () => {
             ? " No emergency contacts are saved for email notification."
             : ` SOS was created, but no emergency contact email was sent. ${emailNotifications.results?.[0]?.reason || "Please check contact emails and email setup."}`
         : "";
-      const whatsappSummary = whatsappNotifications.length > 0
-        ? ` WhatsApp alert opened for ${whatsappNotifications.length} contact(s).`
+      const openedWhatsAppCount = Math.max(instantWhatsApp.length, whatsappNotifications.length);
+      const whatsappSummary = openedWhatsAppCount > 0
+        ? ` WhatsApp alert opened for ${openedWhatsAppCount} contact(s).`
         : " No WhatsApp numbers available on emergency contacts.";
       setSOSId(caseId || null);
       setSosCaseId(formattedCaseId || null);

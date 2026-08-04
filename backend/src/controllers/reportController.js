@@ -371,6 +371,12 @@ exports.getReportById = async (req, res, next) => {
 
 exports.deleteReport = async (req, res, next) => {
   try {
+    if (req.user.role === "reporter") {
+      return res.status(403).json({
+        message: "Reporters cannot delete reports or cases. Contact support if a report was submitted in error.",
+      });
+    }
+
     const report = await prisma.report.findFirst({
       where: { id: req.params.id, userId: req.user.id },
     });

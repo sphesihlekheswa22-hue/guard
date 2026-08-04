@@ -461,6 +461,12 @@ exports.getSystemAlertStats = async (req, res) => {
 
 exports.deleteAlert = async (req, res) => {
   try {
+    if (req.user.role === "reporter") {
+      return res.status(403).json({
+        error: "Reporters cannot delete reports or cases.",
+      });
+    }
+
     const existing = await prisma.alert.findUnique({
       where: { id: req.params.id },
     });

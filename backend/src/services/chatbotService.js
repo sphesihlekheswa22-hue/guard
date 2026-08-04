@@ -47,6 +47,13 @@ const SYSTEM_KEYWORDS = [
   "investigating",
   "pending",
   "resolved",
+  "safe",
+  "safer",
+  "safety",
+  "area",
+  "zone",
+  "hotspot",
+  "shelter",
 ];
 
 const OFF_TOPIC_HINTS = [
@@ -257,11 +264,31 @@ const buildHowToAnswer = (question) => {
   if (q.includes("under investigation") || q.includes("investigating")) {
     return '"Under Investigation" / investigating means police at SAPS Soshanguve are actively reviewing your report.';
   }
+  if (
+    q.includes("safe area") ||
+    q.includes("safe zone") ||
+    q.includes("safer area") ||
+    q.includes("safety map") ||
+    (q.includes("safe") && (q.includes("area") || q.includes("zone") || q.includes("place") || q.includes("map")))
+  ) {
+    return (
+      "To find a safer area: open Safety Map, then tap any place on the map. SafeGuard checks recent reports/SOS near that spot and shows Lower risk, Medium, or High risk. " +
+      "Prefer Lower-risk spots, stay in well-lit public places, and share your live location with a trusted contact. " +
+      "This is based on SafeGuard reports only — it does not guarantee absolute safety."
+    );
+  }
   if (q.includes("report") || q.includes("submit") || q.includes("create") || q.includes("incident")) {
-    return "To create a report: go to Create Report, choose incident type, enter a Soshanguve-only location, add date and description, attach evidence if available, then submit.";
+    return "To create a report: go to Create Report, choose incident type, enter a Soshanguve-only location, add date and description, attach at least one evidence file or voice recording, then submit.";
   }
   if (q.includes("sos") || q.includes("emergency") || q.includes("alert")) {
-    return "Use Emergency Alert for SOS. SafeGuard captures your location, notifies police, and can email/WhatsApp your emergency contacts. SOS works only inside Soshanguve.";
+    return (
+      "How to create an Emergency SOS:\n" +
+      "1. Open Emergency Alert in your reporter dashboard.\n" +
+      "2. Make sure location access is allowed and you are inside Soshanguve.\n" +
+      "3. Add emergency contacts with phone numbers in Settings (for WhatsApp) and emails (for EmailJS).\n" +
+      "4. Press the SOS button. SafeGuard captures GPS, notifies police, opens WhatsApp with your SOS message, and emails contacts.\n" +
+      "5. Stay as safe as possible and wait for help. Only use SOS for real emergencies."
+    );
   }
   if (q.includes("password") || q.includes("reset") || q.includes("forgot")) {
     return "On Sign In, click Forgot Password, enter your email, then open the reset link emailed to you.";
@@ -270,7 +297,7 @@ const buildHowToAnswer = (question) => {
     return "SafeGuard is localized to Soshanguve only. Reports and SOS outside Soshanguve are blocked. Police officers are assigned to SAPS Soshanguve Police Station.";
   }
   if (q.includes("track") || q.includes("status") || q.includes("tracking")) {
-    return "Open Track Case to see your reports and updates from police/NGO workers.";
+    return "Open Track Case to see your reports and updates from police/NGO workers. Reporters cannot delete submitted cases.";
   }
   if (q.includes("settings") || q.includes("profile") || q.includes("contact")) {
     return "In Settings you can update your profile and emergency contacts (name, relationship, email, phone). Contacts are used for SOS notifications.";

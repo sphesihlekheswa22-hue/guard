@@ -15,6 +15,18 @@ const normalizeFullName = (value = "") => String(value).trim().replace(/\s+/g, "
 
 const isValidFullName = (value = "") => /^[\p{L}]+(?: [\p{L}]+)*$/u.test(normalizeFullName(value));
 
+const normalizeIdNumber = (value = "") => String(value).replace(/\D/g, "").slice(0, 13);
+const isValidIdNumber = (value = "") => /^\d{13}$/.test(normalizeIdNumber(value));
+
+const normalizeSouthAfricanPhone = (value = "") => {
+  const digits = String(value).replace(/\D/g, "");
+  if (digits.startsWith("0027")) return `0${digits.slice(4)}`.slice(0, 10);
+  if (digits.startsWith("27")) return `0${digits.slice(2)}`.slice(0, 10);
+  return digits.slice(0, 10);
+};
+
+const isValidSouthAfricanPhone = (value = "") => /^0[678]\d{8}$/.test(normalizeSouthAfricanPhone(value));
+
 const RESET_TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 const hashResetToken = (token = "") =>
@@ -55,6 +67,8 @@ exports.register = async (req, res) => {
       email,
       password,
       role,
+      phone,
+      idNumber,
       policeStationId,
       policeStationName,
       ngoId,
@@ -86,6 +100,20 @@ exports.register = async (req, res) => {
       return res.status(400).json({ msg: "Password must be at least 8 characters long" });
     }
 
+    const normalizedPhone = normalizeSouthAfricanPhone(phone);
+    if (!isValidSouthAfricanPhone(normalizedPhone)) {
+      return res.status(400).json({
+        msg: "A valid South African mobile number is required (starts with 06, 07, or 08).",
+      });
+    }
+
+    const normalizedIdNumber = normalizeIdNumber(idNumber);
+    if (!isValidIdNumber(normalizedIdNumber)) {
+      return res.status(400).json({
+        msg: "A valid 13-digit South African ID number is required.",
+      });
+    }
+
     console.log("✅ Basic fields validated:", { fullName: normalizedFullName, email: normalizedEmail, role });
 
     if (!USER_ROLE_SET.has(role)) {
@@ -97,6 +125,12 @@ exports.register = async (req, res) => {
       console.error("❌ Registration failed: Admin registration disabled");
       return res.status(403).json({
         msg: "Admin registration is disabled. Use the fixed admin sign-in account.",
+      });
+    }
+
+    if (role === "authority" || role === "officer" || role === "ngo" || role === "ngo_worker") {
+      return res.status(403).json({
+        msg: "Police officer and NGO staff accounts can only be created by an admin.",
       });
     }
 
@@ -146,6 +180,8 @@ exports.register = async (req, res) => {
       fullName: normalizedFullName,
       email: normalizedEmail,
       role,
+      phone: normalizedPhone,
+      idNumber: normalizedIdNumber,
       policeStationId: policeStationId || null,
       policeStationName: stationNameForUser,
       ngoId: ngoId || null,
@@ -159,6 +195,8 @@ exports.register = async (req, res) => {
         fullName: normalizedFullName,
         email: normalizedEmail,
         password: hashed,
+        phone: normalizedPhone,
+        idNumber: normalizedIdNumber,
         role,
         policeStationId: policeStationId || null,
         policeStationName: stationNameForUser,

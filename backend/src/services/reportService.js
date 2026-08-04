@@ -55,6 +55,12 @@ exports.createReportService = async (user, data, files) => {
   console.log("💾 [createReportService] User email:", user.email);
   console.log("💾 [createReportService] User role:", user.role);
 
+  if (!files || files.length === 0) {
+    const error = new Error("At least one evidence file is required to submit a report.");
+    error.status = 400;
+    throw error;
+  }
+
   if (incidentDate && incidentDate > getTodayDateString()) {
     const error = new Error("Incident date cannot be in the future.");
     error.status = 400;

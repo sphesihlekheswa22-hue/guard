@@ -24,7 +24,6 @@ import {
   ChevronLeft,
   Check,
   Loader2,
-  Languages,
 } from "lucide-react";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 import { useToast } from "@/hooks/use-toast";
@@ -128,7 +127,6 @@ const CreateReport = () => {
     stopRecording,
     clearRecording,
   } = useVoiceRecorder();
-  const [translateAudio, setTranslateAudio] = useState(false);
 
   // Auto-fill location (Soshanguve only)
   const fetchLocation = useCallback(() => {
@@ -273,6 +271,16 @@ const CreateReport = () => {
 
   const handleSubmit = async () => {
     if (isSubmitting) return;
+
+    if (files.length === 0) {
+      toast({
+        title: "Evidence required",
+        description: "Please attach at least one evidence file or voice recording before submitting.",
+        variant: "destructive",
+      });
+      setStep(1);
+      return;
+    }
 
     if (isFutureDate(date)) {
       toast({
@@ -532,7 +540,7 @@ const CreateReport = () => {
         <div className="bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl p-4 sm:p-6 lg:p-8 border border-blue-100 shadow-md space-y-6">
           <div className="mb-2">
             <h2 className="text-2xl font-bold text-gray-800">Attach Evidence</h2>
-            <p className="text-sm text-gray-600 mt-1">Upload files, photos, videos, or record a voice testimony. This step is optional.</p>
+            <p className="text-sm text-gray-600 mt-1">Evidence is required. Upload files, photos, videos, or record a voice testimony.</p>
           </div>
           <div className="h-px bg-gradient-to-r from-blue-200 to-transparent"></div>
 
@@ -651,18 +659,6 @@ const CreateReport = () => {
             ) : (
               <div className="space-y-3">
                 <audio controls src={audioUrl} className="w-full" />
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="translate"
-                    className="w-3 h-3 rounded"
-                    checked={translateAudio}
-                    onChange={(e) => setTranslateAudio(e.target.checked)}
-                  />
-                  <Label htmlFor="translate" className="text-xs flex items-center gap-1 text-gray-700">
-                    <Languages className="h-3 w-3" /> Translate
-                  </Label>
-                </div>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={clearRecording} className="text-xs">Re-record</Button>
                   <Button size="sm" onClick={saveAudioEvidence} className="text-xs">
@@ -677,7 +673,21 @@ const CreateReport = () => {
             <Button variant="outline" onClick={() => setStep(0)} className="w-full border-gray-300 text-gray-700 hover:bg-gray-50 text-sm sm:w-auto">
               <ChevronLeft className="h-4 w-4 mr-1" /> Back
             </Button>
-            <Button onClick={() => setStep(2)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:w-auto">
+            <Button
+              onClick={() => {
+                if (files.length === 0) {
+                  toast({
+                    title: "Evidence required",
+                    description: "Attach at least one file or voice recording to continue.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setStep(2);
+              }}
+              disabled={files.length === 0}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:w-auto"
+            >
               Continue to Review <ChevronRight className="h-4 w-4 ml-2" />
             </Button>
           </div>
@@ -769,20 +779,13 @@ const CreateReport = () => {
               </div>
             )}
 
-            {translateAudio && (
-              <div className="bg-white rounded-md p-3 border border-blue-100">
-                <Badge className="bg-blue-100 text-blue-700 border-0 font-semibold gap-1 text-xs">
-                  <Languages className="h-3 w-3" /> Audio translation requested
-                </Badge>
-              </div>
-            )}
           </div>
 
           <div className="flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-between">
             <Button variant="outline" onClick={() => setStep(1)} className="w-full border-gray-300 text-gray-700 hover:bg-gray-50 text-sm sm:w-auto">
               <ChevronLeft className="h-4 w-4 mr-1" /> Back
             </Button>
-            <Button onClick={handleSubmit} disabled={isSubmitting} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 text-sm sm:w-auto">
+            <Button onClick={handleSubmit} disabled={isSubmitting || files.length === 0} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 text-sm sm:w-auto">
               {isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Submitting...

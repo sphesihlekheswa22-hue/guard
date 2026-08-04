@@ -15,7 +15,7 @@ const normalizeFullName = (value = "") => String(value).trim().replace(/\s+/g, "
 const isValidFullName = (value = "") => /^[\p{L}]+(?: [\p{L}]+)*$/u.test(normalizeFullName(value));
 const normalizeOptionalText = (value = "") => String(value).trim().replace(/\s+/g, " ");
 const normalizeIdNumber = (value = "") => String(value).replace(/\D/g, "").slice(0, 13);
-const isValidIdNumber = (value = "") => !value || /^\d{13}$/.test(normalizeIdNumber(value));
+const isValidIdNumber = (value = "") => /^\d{13}$/.test(normalizeIdNumber(value));
 const normalizeAssignmentId = (value = "") => String(value).trim();
 
 const normalizeSouthAfricanPhone = (value = "") => {
