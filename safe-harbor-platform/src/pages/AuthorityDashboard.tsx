@@ -2455,11 +2455,15 @@ const Emergencies = () => {
 
       // Emit WebSocket event to notify reporter
       if (socketRef.current) {
-        socketRef.current.emit("alertStatusUpdated", {
+        const payload = {
           alertId: selectedAlert._id,
           status: newStatus,
           updatedAt: new Date().toISOString(),
-        });
+        };
+        socketRef.current.emit("alertStatusUpdated", payload);
+        if (newStatus === "resolved") {
+          socketRef.current.emit("alertResolved", payload);
+        }
         console.log(`Broadcasted alert ${selectedAlert._id} status update to ${newStatus}`);
       }
 

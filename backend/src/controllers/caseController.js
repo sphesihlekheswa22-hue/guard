@@ -7,6 +7,9 @@ const { buildSosNotifications } = require("../services/sosNotifyService");
 const CASE_INCLUDE = {
   user: true,
   assignedTo: true,
+  alerts: {
+    orderBy: { updatedAt: "desc" },
+  },
 };
 
 const buildLocationUpdate = (body, currentLocation = {}) => {
@@ -404,22 +407,35 @@ exports.getUserCases = async (req, res) => {
     res.json({
       success: true,
       total: userCases.length,
-      cases: userCases.map((c) => ({
-        _id: c.id,
-        id: c.id,
-        caseId: c.caseId || c.id.slice(-8).toUpperCase(),
-        type: c.type,
-        incidentType: c.type === "emergency" ? "Emergency Alert (SOS)" : "Report",
-        priority: c.priority,
-        status: c.status,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-        location: c.location,
-        description: c.type === "emergency" ? "SOS Emergency Alert" : "Case",
-        sosTriggeredAt: c.sosTriggeredAt,
-        notifiedContacts: c.notifiedContacts,
-        policeStationId: c.policeStationId,
-      })),
+      cases: userCases.map((c) => {
+        const linkedAlert = Array.isArray(c.alerts) && c.alerts.length > 0 ? c.alerts[0] : null;
+        // Prefer linked alert status so resolved SOS shows for reporters
+        let displayStatus = c.status;
+        if (linkedAlert?.status === "resolved") {
+          displayStatus = "resolved";
+        } else if (linkedAlert?.status === "call initiated" || linkedAlert?.status === "acknowledged") {
+          displayStatus = "assigned";
+        }
+
+        return {
+          _id: c.id,
+          id: c.id,
+          caseId: c.caseId || c.id.slice(-8).toUpperCase(),
+          type: c.type,
+          incidentType: c.type === "emergency" ? "Emergency Alert (SOS)" : "Report",
+          priority: c.priority,
+          status: displayStatus,
+          alertStatus: linkedAlert?.status || null,
+          resolvedAt: linkedAlert?.resolvedAt || null,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          location: c.location,
+          description: c.type === "emergency" ? "SOS Emergency Alert" : "Case",
+          sosTriggeredAt: c.sosTriggeredAt,
+          notifiedContacts: c.notifiedContacts,
+          policeStationId: c.policeStationId,
+        };
+      }),
     });
   } catch (error) {
     console.error("Error fetching user cases:", error);

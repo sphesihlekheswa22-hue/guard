@@ -206,6 +206,24 @@ exports.updateAlertStatus = async (req, res) => {
       data: updateData,
     });
 
+    // Keep the linked SOS case in sync so reporters see the same status
+    if (existingAlert?.caseId) {
+      const caseUpdate = {};
+      if (status === "resolved") {
+        caseUpdate.status = "resolved";
+      } else if (status === "call initiated" || status === "acknowledged") {
+        caseUpdate.status = "assigned";
+      } else if (status === "active") {
+        caseUpdate.status = "active";
+      }
+      if (Object.keys(caseUpdate).length > 0) {
+        await prisma.case.updateMany({
+          where: { id: existingAlert.caseId },
+          data: caseUpdate,
+        });
+      }
+    }
+
     const alert = await fetchAlert(req.params.id);
 
     if (alert) {
@@ -317,6 +335,13 @@ exports.resolveAlert = async (req, res) => {
         resolvedAt: new Date(),
       },
     });
+
+    if (existingAlert?.caseId) {
+      await prisma.case.updateMany({
+        where: { id: existingAlert.caseId },
+        data: { status: "resolved" },
+      });
+    }
 
     const alert = await fetchAlert(req.params.id);
 

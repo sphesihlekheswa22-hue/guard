@@ -6,6 +6,7 @@ const Overview = () => {
   const [user, setUser] = useState<{ fullName?: string } | null>(null);
   const [reports, setReports] = useState<any[]>([]);
   const [cases, setCases] = useState<any[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({
@@ -37,7 +38,9 @@ const Overview = () => {
           setReports(userReports);
 
           const total = userReports.length;
-          const resolvedReports = userReports.filter((r: any) => r.status === "resolved").length;
+          const resolvedReports = userReports.filter((r: any) =>
+            r.status === "resolved" || r.status === "dismissed"
+          ).length;
 
           setStats((prev) => ({ ...prev, total, resolvedReports }));
         }
@@ -52,7 +55,9 @@ const Overview = () => {
         const alertsRes = await fetch("/api/alerts/me", { headers });
         if (alertsRes.ok) {
           const alertsData = await alertsRes.json();
-          const resolvedAlerts = (alertsData.alerts || []).filter((a: any) => a.status === "resolved").length;
+          const userAlerts = alertsData.alerts || [];
+          setAlerts(userAlerts);
+          const resolvedAlerts = userAlerts.filter((a: any) => a.status === "resolved").length;
           setStats((prev) => ({ ...prev, resolvedAlerts }));
         }
       } catch (err: any) {
@@ -64,26 +69,64 @@ const Overview = () => {
     fetchData();
   }, []);
 
+  const getReportBadge = (status: string) => {
+    if (status === "referred_to_ngo") return { label: "Referred to NGO", className: "bg-purple/10 text-purple" };
+    if (status === "investigating") return { label: "Under Investigation", className: "bg-warning/10 text-warning" };
+    if (status === "resolved") return { label: "Resolved", className: "bg-safe/10 text-safe" };
+    if (status === "dismissed") return { label: "Dismissed", className: "bg-muted text-muted-foreground" };
+    return { label: "Submitted", className: "bg-primary/10 text-primary" };
+  };
+
+  const getSosBadge = (status: string) => {
+    if (status === "resolved") return { label: "Resolved", className: "bg-safe/10 text-safe" };
+    if (status === "assigned" || status === "call initiated") return { label: "Call Initiated", className: "bg-warning/10 text-warning" };
+    return { label: "Active", className: "bg-emergency/10 text-emergency" };
+  };
+
+  // Prefer alert status for SOS so resolved emergencies show on the reporter overview
+  const alertStatusByCaseId = new Map<string, string>();
+  alerts.forEach((alert: any) => {
+    const linkedCaseId = (alert.caseId?._id || alert.caseId?.id || alert.caseId || "").toString();
+    if (linkedCaseId) alertStatusByCaseId.set(linkedCaseId, alert.status);
+    const displayCaseId = alert.caseId?.caseId;
+    if (displayCaseId) alertStatusByCaseId.set(displayCaseId, alert.status);
+  });
+
   const recentActivity = [
-    ...reports.map((report) => ({
-      id: report.caseId || report._id?.toString().slice(-8).toUpperCase() || "",
-      type: "report",
-      message: `Report ${report.caseId || report._id?.toString().slice(-8).toUpperCase() || ""} filed`,
-      badge: report.status === "referred_to_ngo" ? "Referred to NGO" : report.status === "investigating" ? "Under Investigation" : "Submitted",
-      badgeClass: report.status === "referred_to_ngo" ? "bg-purple/10 text-purple" : report.status === "investigating" ? "bg-warning/10 text-warning" : "bg-primary/10 text-primary",
-      timestamp: report.updatedAt || report.createdAt,
-    })),
-    ...cases.map((sosCase) => ({
-      id: sosCase.caseId || sosCase._id?.toString().slice(-8).toUpperCase() || "",
-      type: "sos",
-      message: `SOS Alert ${sosCase.caseId || sosCase._id?.toString().slice(-8).toUpperCase() || ""} triggered`,
-      badge: sosCase.status === "resolved" ? "Resolved" : sosCase.status === "assigned" ? "Assigned" : "Active",
-      badgeClass: sosCase.status === "resolved" ? "bg-safe/10 text-safe" : sosCase.status === "assigned" ? "bg-warning/10 text-warning" : "bg-emergency/10 text-emergency",
-      timestamp: sosCase.sosTriggeredAt || sosCase.createdAt,
-    })),
+    ...reports.map((report) => {
+      const badge = getReportBadge(report.status || "pending");
+      return {
+        id: report.caseId || report._id?.toString().slice(-8).toUpperCase() || "",
+        type: "report" as const,
+        message: `Report ${report.caseId || report._id?.toString().slice(-8).toUpperCase() || ""} filed`,
+        badge: badge.label,
+        badgeClass: badge.className,
+        timestamp: report.updatedAt || report.createdAt,
+      };
+    }),
+    ...cases.map((sosCase) => {
+      const caseKey = (sosCase._id || sosCase.id || "").toString();
+      const status =
+        alertStatusByCaseId.get(caseKey) ||
+        alertStatusByCaseId.get(sosCase.caseId) ||
+        sosCase.alertStatus ||
+        sosCase.status ||
+        "active";
+      const badge = getSosBadge(status);
+      return {
+        id: sosCase.caseId || sosCase._id?.toString().slice(-8).toUpperCase() || "",
+        type: "sos" as const,
+        message: `SOS Alert ${sosCase.caseId || sosCase._id?.toString().slice(-8).toUpperCase() || ""} ${
+          status === "resolved" ? "resolved" : "triggered"
+        }`,
+        badge: badge.label,
+        badgeClass: badge.className,
+        timestamp: sosCase.resolvedAt || sosCase.updatedAt || sosCase.sosTriggeredAt || sosCase.createdAt,
+      };
+    }),
   ]
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, 3);
+    .slice(0, 5);
 
   return (
     <div className="space-y-8">

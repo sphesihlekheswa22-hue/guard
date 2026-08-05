@@ -500,7 +500,11 @@ const TrackCase = () => {
             date: c.sosTriggeredAt ? c.sosTriggeredAt.slice(0, 10) : c.createdAt ? c.createdAt.slice(0, 10) : "",
             dateTime: c.sosTriggeredAt ? formatTimestamp(c.sosTriggeredAt) : formatTimestamp(c.createdAt),
             status: c.status || "active",
-            lastUpdate: c.updatedAt ? timeAgo(c.updatedAt) : "",
+            lastUpdate: c.resolvedAt
+              ? timeAgo(c.resolvedAt)
+              : c.updatedAt
+                ? timeAgo(c.updatedAt)
+                : "",
             evidence: 0,
             evidenceFiles: [],
             priority: c.priority,
@@ -509,9 +513,13 @@ const TrackCase = () => {
             location: c.location?.address || c.location || "",
             coordinates: c.location?.coordinates || null,
             updates: [
+              c.status === "resolved" && {
+                date: (c.resolvedAt || c.updatedAt || "").toString().slice(0, 10),
+                message: "✓ Alert Resolved",
+              },
               { date: c.updatedAt ? c.updatedAt.slice(0, 10) : "", message: "Case updated" },
               { date: c.createdAt ? c.createdAt.slice(0, 10) : "", message: "SOS Triggered" }
-            ]
+            ].filter(Boolean)
           }));
       }
 
@@ -609,9 +617,8 @@ const TrackCase = () => {
       // Get all alert case IDs to filter out duplicate SOS cases
       const alertCaseIds = new Set(
         alerts
-          .filter(a => a.type === "sos" || (a.originalCaseId && typeof a.originalCaseId === 'string'))
-          .map(a => a.originalCaseId || "")
-          .filter(id => id) // Remove empty strings
+          .map((a: any) => a.originalCaseId || "")
+          .filter((id: string) => id)
       );
 
       // Filter out SOS cases that have a corresponding alert
@@ -676,6 +683,12 @@ const TrackCase = () => {
         
         // Update the cases list with the new alert data
         setCases((prevCases) => {
+          const statusMessage =
+            data.status === "resolved"
+              ? "✓ Alert Resolved"
+              : data.status === "call initiated"
+                ? "📞 Call Initiated by Police Officer"
+                : `Status changed to ${data.status}`;
           const updated = prevCases.map((c) =>
             c.id === incomingAlertId
               ? {
@@ -683,7 +696,7 @@ const TrackCase = () => {
                   status: data.status,
                   lastUpdate: timeAgo(new Date().toISOString()),
                   updates: [
-                    { date: new Date().toISOString().slice(0, 10), message: data.status === "call initiated" ? "📞 Call Initiated by Police Officer" : `Status changed to ${data.status}` },
+                    { date: new Date().toISOString().slice(0, 10), message: statusMessage },
                     ...c.updates,
                   ],
                 }
@@ -709,7 +722,15 @@ const TrackCase = () => {
                 updatedAt: new Date().toISOString(),
                 lastUpdate: timeAgo(new Date().toISOString()),
                 updates: [
-                  { date: new Date().toISOString().slice(0, 10), message: data.status === "call initiated" ? "📞 Call Initiated by Police Officer" : `Status changed to ${data.status}` },
+                  {
+                    date: new Date().toISOString().slice(0, 10),
+                    message:
+                      data.status === "resolved"
+                        ? "✓ Alert Resolved"
+                        : data.status === "call initiated"
+                          ? "📞 Call Initiated by Police Officer"
+                          : `Status changed to ${data.status}`,
+                  },
                   ...(prev.updates || []),
                 ],
               }
