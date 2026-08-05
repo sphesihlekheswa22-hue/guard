@@ -400,9 +400,23 @@ exports.deleteReport = async (req, res, next) => {
 exports.updateReport = async (req, res, next) => {
   try {
     const { status } = req.body;
+    const dismissalReason = String(req.body.reason || req.body.details || "").trim();
 
     if (!status) {
       return res.status(400).json({ message: "Status is required" });
+    }
+
+    if (status === "dismissed") {
+      if (!["authority", "officer", "admin"].includes(req.user.role)) {
+        return res.status(403).json({
+          message: "Only police officers can dismiss a case.",
+        });
+      }
+      if (!dismissalReason) {
+        return res.status(400).json({
+          message: "Dismissal details are required. Explain why this case is dismissed.",
+        });
+      }
     }
 
     const report = await prisma.report.findUnique({
@@ -416,13 +430,18 @@ exports.updateReport = async (req, res, next) => {
     const oldStatus = report.status;
     console.log(`📝 [updateReport] Status change: ${oldStatus} → ${status} by ${req.user.email}`);
 
+    const historyReason =
+      status === "dismissed"
+        ? dismissalReason
+        : `Status changed from ${oldStatus} to ${status}`;
+
     const statusHistory = [...(report.statusHistory || [])];
     statusHistory.push({
       status,
       changedBy: req.user.id,
       changedByRole: req.user.role,
       changedAt: new Date().toISOString(),
-      reason: `Status changed from ${oldStatus} to ${status}`,
+      reason: historyReason,
     });
 
     const updateData = {
@@ -471,8 +490,15 @@ exports.updateReport = async (req, res, next) => {
       resourceType: "report",
       resourceId: updated.id,
       resourceLabel: updated.caseId,
-      details: `Changed report status from ${oldStatus} to ${status}`,
-      metadata: { oldStatus, newStatus: status },
+      details:
+        status === "dismissed"
+          ? `Dismissed report ${updated.caseId}: ${dismissalReason}`
+          : `Changed report status from ${oldStatus} to ${status}`,
+      metadata: {
+        oldStatus,
+        newStatus: status,
+        ...(status === "dismissed" ? { dismissalReason } : {}),
+      },
     });
 
     const serialized = await enrichReportUsers(updated);

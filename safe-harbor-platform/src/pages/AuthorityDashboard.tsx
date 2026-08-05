@@ -4,6 +4,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import ProfileSettings from "@/components/reporter/Settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { io } from "socket.io-client";
@@ -50,7 +51,9 @@ const statusStyles: Record<string, string> = {
   new: "bg-primary/10 text-primary",
   investigating: "bg-warning/10 text-warning",
   "referred to ngo": "bg-purple/10 text-purple",
+  referred_to_ngo: "bg-purple/10 text-purple",
   resolved: "bg-safe/10 text-safe",
+  dismissed: "bg-muted text-muted-foreground",
   pending: "bg-primary/10 text-primary",
 };
 
@@ -186,10 +189,14 @@ const getStatusDisplayText = (status: string): string => {
     call_initiated: "Call Initiated",
     arranged_counselling: "Counselling Arranged",
     resolved: "Resolved",
+    dismissed: "Dismissed",
     pending: "Pending",
   };
   return statusMap[status] || status;
 };
+
+const isHandledPoliceStatus = (status: string) =>
+  status === "resolved" || status === "dismissed";
 
 const formatAuthorityDateTime = (date?: string) => {
   return date ? new Date(date).toLocaleString() : "N/A";
@@ -944,6 +951,19 @@ const CaseTable = ({
                 >
                   Resolved
                 </button>
+                <button
+                  onClick={() => {
+                    onFilterChange?.("dismissed");
+                    setShowFilterDropdown(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                    filterStatus === "dismissed"
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-muted"
+                  }`}
+                >
+                  Dismissed
+                </button>
               </div>
             </div>
           )}
@@ -1552,6 +1572,7 @@ const UpdateStatus = () => {
   const [selectedCase, setSelectedCase] = useState<any | null>(null);
   const [caseDetails, setCaseDetails] = useState<any | null>(null);
   const [newStatus, setNewStatus] = useState<string>("");
+  const [dismissalReason, setDismissalReason] = useState<string>("");
   const [selectedNgoId, setSelectedNgoId] = useState<string>("");
   const [ngoOptions, setNgoOptions] = useState<{ id: string; label: string }[]>([]);
   const [reports, setReports] = useState<any[]>([]);
@@ -1684,14 +1705,23 @@ const UpdateStatus = () => {
   });
 
   // Referred cases leave this workflow and are managed from the Referrals tab.
-  const activeReports = filteredReports.filter(r => r.status !== "resolved" && !isNgoReferralCase(r));
-  const handledReports = filteredReports.filter(r => r.status === "resolved" && !isNgoReferralCase(r));
+  const activeReports = filteredReports.filter(r => !isHandledPoliceStatus(r.status) && !isNgoReferralCase(r));
+  const handledReports = filteredReports.filter(r => isHandledPoliceStatus(r.status) && !isNgoReferralCase(r));
+
+  const resetStatusForm = () => {
+    setSelectedCase(null);
+    setCaseDetails(null);
+    setNewStatus("");
+    setSelectedNgoId("");
+    setDismissalReason("");
+  };
 
   const handleSelectCase = (report: any) => {
     setSelectedCase(report);
     setCaseDetails(report);
     setNewStatus("");
     setSelectedNgoId("");
+    setDismissalReason("");
   };
 
   const handleUpdateStatus = async () => {
@@ -1706,6 +1736,16 @@ const UpdateStatus = () => {
       return;
     }
 
+    const trimmedDismissalReason = dismissalReason.trim();
+    if (newStatus === "dismissed" && !trimmedDismissalReason) {
+      toast({
+        title: "Dismissal details required",
+        description: "Explain why this case is being dismissed.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const token = localStorage.getItem("token");
       const selectedNgo = ngoOptions.find((ngo) => ngo.id === selectedNgoId);
@@ -1713,6 +1753,10 @@ const UpdateStatus = () => {
       if (newStatus === "referred_to_ngo") {
         payload.referredNgoId = selectedNgoId;
         payload.referredNgoName = selectedNgo?.label || "";
+      }
+      if (newStatus === "dismissed") {
+        payload.reason = trimmedDismissalReason;
+        payload.details = trimmedDismissalReason;
       }
 
       const res = await fetch(`/api/reports/${selectedCase._id}`, {
@@ -1732,7 +1776,9 @@ const UpdateStatus = () => {
         description:
           newStatus === "referred_to_ngo"
             ? `Case ${selectedCase.caseId} referred to ${selectedNgo?.label || "NGO"}`
-            : `Case ${selectedCase.caseId} status changed to ${newStatus}`,
+            : newStatus === "dismissed"
+              ? `Case ${selectedCase.caseId} dismissed`
+              : `Case ${selectedCase.caseId} status changed to ${newStatus}`,
       });
 
       // Update reports list
@@ -1756,16 +1802,13 @@ const UpdateStatus = () => {
           reportId: selectedCase._id,
           caseId: selectedCase.caseId,
           status: newStatus,
+          reason: newStatus === "dismissed" ? trimmedDismissalReason : undefined,
           updatedAt: new Date().toISOString(),
         });
         console.log(`Broadcasted report ${selectedCase._id} status update to ${newStatus}`);
       }
 
-      // Close modal
-      setSelectedCase(null);
-      setCaseDetails(null);
-      setNewStatus("");
-      setSelectedNgoId("");
+      resetStatusForm();
     } catch (err: any) {
       toast({
         title: "Failed to update status",
@@ -1863,12 +1906,7 @@ const UpdateStatus = () => {
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
         <div className="bg-card rounded-xl shadow-xl border border-border/60 w-full max-w-2xl mx-auto p-6 relative space-y-4">
           <button 
-            onClick={() => {
-              setSelectedCase(null);
-              setCaseDetails(null);
-              setNewStatus("");
-              setSelectedNgoId("");
-            }}
+            onClick={resetStatusForm}
             className="absolute top-4 right-4 p-1 hover:bg-muted rounded"
           >
             <X className="h-5 w-5" />
@@ -1903,6 +1941,7 @@ const UpdateStatus = () => {
                   onClick={() => {
                     setNewStatus("investigating");
                     setSelectedNgoId("");
+                    setDismissalReason("");
                   }}
                 >
                   Investigating
@@ -1910,7 +1949,10 @@ const UpdateStatus = () => {
                 <Button 
                   variant={newStatus === "referred_to_ngo" ? "default" : "outline"} 
                   size="sm"
-                  onClick={() => setNewStatus("referred_to_ngo")}
+                  onClick={() => {
+                    setNewStatus("referred_to_ngo");
+                    setDismissalReason("");
+                  }}
                 >
                   Refer to NGO
                 </Button>
@@ -1920,9 +1962,20 @@ const UpdateStatus = () => {
                   onClick={() => {
                     setNewStatus("resolved");
                     setSelectedNgoId("");
+                    setDismissalReason("");
                   }}
                 >
                   Resolved
+                </Button>
+                <Button 
+                  variant={newStatus === "dismissed" ? "default" : "outline"} 
+                  size="sm"
+                  onClick={() => {
+                    setNewStatus("dismissed");
+                    setSelectedNgoId("");
+                  }}
+                >
+                  Dismissed
                 </Button>
               </div>
             </div>
@@ -1951,9 +2004,31 @@ const UpdateStatus = () => {
               </div>
             )}
 
+            {newStatus === "dismissed" && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">
+                  Dismissal details <span className="text-emergency">*</span>
+                </p>
+                <Textarea
+                  value={dismissalReason}
+                  onChange={(e) => setDismissalReason(e.target.value)}
+                  placeholder="Explain why this case is being dismissed..."
+                  className="min-h-[100px]"
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Required. The reporter will see this reason in their case timeline.
+                </p>
+              </div>
+            )}
+
             <Button 
               onClick={handleUpdateStatus}
-              disabled={!newStatus || (newStatus === "referred_to_ngo" && !selectedNgoId)}
+              disabled={
+                !newStatus ||
+                (newStatus === "referred_to_ngo" && !selectedNgoId) ||
+                (newStatus === "dismissed" && !dismissalReason.trim())
+              }
               className="w-full"
             >
               Save Status Update

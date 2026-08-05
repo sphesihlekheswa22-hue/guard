@@ -52,6 +52,7 @@ const getStatusLabel = (status = "pending") => {
     call_initiated: "Call Initiated",
     arranged_counselling: "Counselling Arranged",
     resolved: "Resolved",
+    dismissed: "Dismissed",
     active: "Active",
   };
   return map[status] || status.replace(/_/g, " ");
@@ -972,6 +973,7 @@ const TrackCase = () => {
     new: "bg-primary/10 text-primary",
     investigating: "bg-warning/10 text-warning",
     resolved: "bg-safe/10 text-safe",
+    dismissed: "bg-muted text-muted-foreground",
     pending: "bg-primary/10 text-primary",
     active: "bg-emergency/10 text-emergency",
     "call initiated": "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300",
@@ -983,6 +985,7 @@ const TrackCase = () => {
     new: <Clock className="h-4 w-4" />,
     investigating: <Clock className="h-4 w-4" />,
     resolved: <CheckCircle className="h-4 w-4" />,
+    dismissed: <X className="h-4 w-4" />,
     pending: <Clock className="h-4 w-4" />,
     active: <AlertTriangle className="h-4 w-4" />,
     assigned: <Clock className="h-4 w-4" />,
@@ -1013,10 +1016,10 @@ const TrackCase = () => {
 
   // Separate active and resolved cases
   const activeCases = filteredCases.filter(c => 
-    c.status !== "resolved" && c.status !== "closed"
+    c.status !== "resolved" && c.status !== "closed" && c.status !== "dismissed"
   );
   const resolvedCases = filteredCases.filter(c => 
-    c.status === "resolved" || c.status === "closed"
+    c.status === "resolved" || c.status === "closed" || c.status === "dismissed"
   );
 
   // Fetch full case details when selectedCase changes
@@ -1843,7 +1846,8 @@ const TrackCase = () => {
                             referred_to_ngo: { bg: "bg-purple-500", border: "border-purple-200", icon: "🤝" },
                             call_initiated: { bg: "bg-blue-600", border: "border-blue-300", icon: "📞" },
                             arranged_counselling: { bg: "bg-indigo-500", border: "border-indigo-200", icon: "💬" },
-                            resolved: { bg: "bg-green-500", border: "border-green-200", icon: "✓" }
+                            resolved: { bg: "bg-green-500", border: "border-green-200", icon: "✓" },
+                            dismissed: { bg: "bg-gray-500", border: "border-gray-300", icon: "✕" },
                           };
                           
                           const colors = statusColorMap[entry.status] || { bg: "bg-gray-500", border: "border-gray-200", icon: "•" };
@@ -1870,6 +1874,12 @@ const TrackCase = () => {
                                 <div className="text-xs text-muted-foreground">{timestamp}</div>
                                 {entry.changedBy && (
                                   <div className="text-xs text-muted-foreground">by {entry.changedByRole}</div>
+                                )}
+                                {entry.reason && (
+                                  <div className="text-xs text-muted-foreground mt-1 max-w-xs">
+                                    {entry.status === "dismissed" ? "Reason: " : ""}
+                                    {entry.reason}
+                                  </div>
                                 )}
                               </div>
                             </div>
