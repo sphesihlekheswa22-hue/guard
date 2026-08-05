@@ -1,5 +1,6 @@
 const prisma = require("./prisma");
 const { ensureSeedData } = require("./seed");
+const { unifySoshanguveStationIds } = require("../services/stationScopeService");
 
 const connectDB = async () => {
   try {
@@ -11,6 +12,8 @@ const connectDB = async () => {
     console.log("PostgreSQL Connected via Prisma");
 
     await ensureSeedData();
+    // Fix officers who have "SAPS Soshanguve" by name but a different station id than reports
+    await unifySoshanguveStationIds();
   } catch (err) {
     console.error(err);
     process.exit(1);

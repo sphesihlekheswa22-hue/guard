@@ -2,6 +2,7 @@ const prisma = require("../config/prisma");
 const { createReportService, getAllReports, reportInclude } = require("../services/reportService");
 const { logAudit } = require("../services/auditService");
 const { serializeReport, serializeUser, userIdOf } = require("../lib/serialize");
+const { buildOfficerStationWhere } = require("../services/stationScopeService");
 
 const NGO_ACTIVE_REFERRAL_STATUSES = ["referred_to_ngo", "call_initiated", "arranged_counselling"];
 
@@ -142,9 +143,10 @@ const buildLocationUpdate = (body, currentLocation = {}) => {
   return location;
 };
 
-const getStationFilter = (user) => {
+const getStationFilter = async (user) => {
   if ((user.role === "authority" || user.role === "officer") && user.policeStationId) {
-    return { policeStationId: user.policeStationId };
+    // Include all Soshanguve station id variants (old Mongo ids, seed cuids, codes)
+    return buildOfficerStationWhere(user);
   }
 
   if ((user.role === "ngo" || user.role === "ngo_worker") && user.ngoId) {
@@ -306,7 +308,7 @@ exports.createReport = async (req, res, next) => {
 exports.getReports = async (req, res, next) => {
   try {
     let data;
-    const stationFilter = getStationFilter(req.user);
+    const stationFilter = await getStationFilter(req.user);
 
     console.log("📥 [getReports] Called by user:", req.user.email, "Role:", req.user.role);
     console.log("📥 [getReports] User ID:", req.user.id);
@@ -352,7 +354,7 @@ exports.getReports = async (req, res, next) => {
 
 exports.getReportById = async (req, res, next) => {
   try {
-    const stationFilter = getStationFilter(req.user);
+    const stationFilter = await getStationFilter(req.user);
     const where = stationFilter
       ? { id: req.params.id, ...stationFilter }
       : { id: req.params.id, userId: req.user.id };

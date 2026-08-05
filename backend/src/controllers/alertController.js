@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 const { serializeAlert, userIdOf } = require("../lib/serialize");
 const { logAudit } = require("../services/auditService");
+const { buildOfficerStationWhere } = require("../services/stationScopeService");
 
 const ALERT_INCLUDE = {
   user: true,
@@ -10,18 +11,18 @@ const ALERT_INCLUDE = {
 
 const EMPTY_FILTER = { id: { in: [] } };
 
-const getAlertQueryFilter = (user) => {
+const getAlertQueryFilter = async (user) => {
   if (user.role === "authority" || user.role === "officer") {
     if (!user.policeStationId) return EMPTY_FILTER;
-    return { policeStationId: String(user.policeStationId) };
+    return buildOfficerStationWhere(user);
   }
   return { userId: userIdOf(user) };
 };
 
-const getSystemAlertFilter = (user) => {
+const getSystemAlertFilter = async (user) => {
   if (user.role === "authority" || user.role === "officer") {
     if (!user.policeStationId) return EMPTY_FILTER;
-    return { policeStationId: String(user.policeStationId) };
+    return buildOfficerStationWhere(user);
   }
   return EMPTY_FILTER;
 };
@@ -73,7 +74,7 @@ const fetchAlert = (id) =>
 
 exports.getResolvedAlerts = async (req, res) => {
   try {
-    const stationFilter = getAlertQueryFilter(req.user);
+    const stationFilter = await getAlertQueryFilter(req.user);
     const alerts = await prisma.alert.findMany({
       where: { ...stationFilter, status: "resolved" },
       include: ALERT_INCLUDE,
@@ -95,7 +96,7 @@ exports.getResolvedAlerts = async (req, res) => {
 
 exports.getAllActiveAlerts = async (req, res) => {
   try {
-    const stationFilter = getAlertQueryFilter(req.user);
+    const stationFilter = await getAlertQueryFilter(req.user);
     const alerts = await prisma.alert.findMany({
       where: {
         ...stationFilter,
@@ -453,7 +454,7 @@ exports.getAlertStats = async (req, res) => {
 
 exports.getSystemAlertStats = async (req, res) => {
   try {
-    const stationFilter = getSystemAlertFilter(req.user);
+    const stationFilter = await getSystemAlertFilter(req.user);
 
     const [activeAlerts, resolvedAlerts] = await Promise.all([
       prisma.alert.count({
