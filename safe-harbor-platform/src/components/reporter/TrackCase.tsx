@@ -1000,10 +1000,16 @@ const TrackCase = () => {
       }
       return true;
     })
-    .filter(c =>
-      c.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.type.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    .filter(c => {
+      const term = searchTerm.trim().toLowerCase();
+      if (!term) return true;
+      return (
+        String(c.caseId || "").toLowerCase().includes(term) ||
+        String(c.id || "").toLowerCase().includes(term) ||
+        String(c.type || "").toLowerCase().includes(term) ||
+        String(c.status || "").toLowerCase().includes(term)
+      );
+    });
 
   // Separate active and resolved cases
   const activeCases = filteredCases.filter(c => 
