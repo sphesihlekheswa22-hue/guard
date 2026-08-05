@@ -3,8 +3,7 @@ const { createReportService, getAllReports, reportInclude } = require("../servic
 const { logAudit } = require("../services/auditService");
 const { serializeReport, serializeUser, userIdOf } = require("../lib/serialize");
 const { buildOfficerStationWhere } = require("../services/stationScopeService");
-
-const NGO_ACTIVE_REFERRAL_STATUSES = ["referred_to_ngo", "call_initiated", "arranged_counselling"];
+const { buildNgoReferralWhere, resolveCanonicalNgo } = require("../services/ngoScopeService");
 
 const USER_SELECT = {
   id: true,
@@ -13,23 +12,6 @@ const USER_SELECT = {
   role: true,
   policeStationName: true,
 };
-
-const buildNgoReferralWhere = (ngoId) => ({
-  AND: [
-    {
-      OR: [
-        { status: { in: NGO_ACTIVE_REFERRAL_STATUSES } },
-        {
-          statusHistory: {
-            path: [],
-            string_contains: "referred_to_ngo",
-          },
-        },
-      ],
-    },
-    { referredNgoId: ngoId },
-  ],
-});
 
 const collectJsonUserIds = (report) => {
   const ids = new Set();
@@ -149,8 +131,9 @@ const getStationFilter = async (user) => {
     return buildOfficerStationWhere(user);
   }
 
-  if ((user.role === "ngo" || user.role === "ngo_worker") && user.ngoId) {
-    return buildNgoReferralWhere(user.ngoId);
+  if ((user.role === "ngo" || user.role === "ngo_worker") && (user.ngoId || user.ngoName)) {
+    // Match all id/code/name variants for this NGO (old Mongo ids vs seed cuids)
+    return buildNgoReferralWhere(user);
   }
 
   return null;
@@ -467,17 +450,16 @@ exports.updateReport = async (req, res, next) => {
         });
       }
 
-      if (!referredNgoName) {
-        const ngo = await prisma.ngoOrg.findFirst({
-          where: {
-            OR: [{ id: referredNgoId }, { code: referredNgoId }],
-          },
+      const ngo = await resolveCanonicalNgo(referredNgoId, referredNgoName);
+      if (!ngo) {
+        return res.status(400).json({
+          message: "Selected NGO was not found. Pick an NGO from the list and try again.",
         });
-        referredNgoName = ngo?.name || "";
       }
 
-      updateData.referredNgoId = referredNgoId;
-      updateData.referredNgoName = referredNgoName;
+      // Always store the canonical org id so NGO workers can see the referral
+      updateData.referredNgoId = ngo.id;
+      updateData.referredNgoName = ngo.name || referredNgoName;
     }
 
     const updated = await prisma.report.update({
